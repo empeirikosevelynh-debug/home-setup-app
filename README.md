@@ -29,7 +29,7 @@ For plain prompts use `zsh scripts/bootstrap.zsh -- --accessible`. `--build-only
 ./bin/golden-setup --version
 ```
 
-In an extracted binary archive use `./golden-setup`, without `bin/`. A prebuilt executable needs no Go compiler. Installation still needs native Homebrew and Command Line Tools; the source starter can prepare them.
+The starter builds `bin/golden-setup`; the repository does not include prebuilt executables. In an extracted binary archive use `./golden-setup`, without `bin/`. A prebuilt executable needs no Go compiler. Installation still needs native Homebrew and Command Line Tools; the source starter can prepare them.
 
 Use arrows and Space to select options; Enter advances. Preview/summary pages scroll with arrows or Page Up/Page Down. `e` edits a preview; `a` accepts its supported plan. Each differing file shows a local diff: `y` approves replacement with a private backup; `n` or Enter preserves it. Escape/Ctrl+C request exit or cancellation. `q` remains ordinary input text and closes a completed summary. At least 48 × 18 cells are required for interaction; smaller windows pause input. Light/dark styling follows the terminal background.
 
