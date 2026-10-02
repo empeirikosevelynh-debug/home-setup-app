@@ -12,7 +12,7 @@ import (
 
 func welcomeForm(resume *bool, available bool, notice string, dark func() bool) *huh.Form {
 	title := "Migration first"
-	desc := "If reinstalling macOS, restore your files and settings with Migration Assistant before running setup. Existing configuration is preserved unless you review and accept a replacement."
+	desc := "If reinstalling macOS, restore your files and settings with Migration Assistant before running setup. To bring over only your files and apps, choose your previous home folder later in setup instead. Existing configuration is preserved unless you review and accept a replacement."
 	if goos == "windows" {
 		title = "Restore first"
 		desc = "If you are moving to a new PC, restore your files from your backup before running setup. Existing configuration is preserved unless you review and accept a replacement."
@@ -75,9 +75,34 @@ func selectionForm(o *domain.Options, dark func() bool) (*huh.Form, []*huh.Multi
 		fields = append(fields, huh.NewConfirm().Title("Create a new project if absent or empty?").Value(&w.Create))
 		groups = append(groups, huh.NewGroup(fields...).WithHideFunc(func() bool { return !plan.Has(o.Languages, w.Language) }))
 	}
+	imports, folderList := importForm(o)
 	previous, previousList := previousForm(o)
-	groups = append(groups, previous...)
-	return huh.NewForm(groups...).WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return formTheme(dark()) })), []*huh.MultiSelect[string]{apps, plugins, langs, previousList}
+	groups = append(append(groups, imports...), previous...)
+	return huh.NewForm(groups...).WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return formTheme(dark()) })), []*huh.MultiSelect[string]{apps, plugins, langs, folderList, previousList}
+}
+
+// importForm asks for a previous home folder and which of its folders to
+// copy. The folders appear once a home folder is chosen, preselected as
+// importFolders suggests unless restored choices say otherwise.
+func importForm(o *domain.Options) ([]*huh.Group, *huh.MultiSelect[string]) {
+	restored := o.ImportFrom
+	list := huh.NewMultiSelect[string]().Title("Folders to import").Description("Copied into this home folder. Nothing here is replaced: where a file differs, yours stays and theirs is saved in ~/"+plan.ConflictsFolder+". Hidden folders marked keys hold private keys; bring them only if this Mac should use them.").OptionsFunc(func() []huh.Option[string] {
+		choices, _ := importFolders(o.ImportFrom)
+		preset := o.ImportFrom != restored || len(o.ImportFolders) == 0
+		options := []huh.Option[string]{}
+		for _, c := range choices {
+			options = append(options, huh.NewOption(c.label, c.name).Selected(preset && c.preselect || !preset && plan.Has(o.ImportFolders, c.name)))
+		}
+		return options
+	}, &o.ImportFrom).Value(&o.ImportFolders).Filterable(true)
+	path := huh.NewInput().Title("Previous home folder (optional)").Description("Your previous Mac's home folder, on a drive, a share or restored from a backup, such as /Volumes/Backup/Users/you. Library and app data are left to Migration Assistant. Leave empty to skip.").Suggestions(previousHomes()).Value(&o.ImportFrom).Validate(func(s string) error {
+		if s == "" {
+			return nil
+		}
+		_, e := importFolders(s)
+		return e
+	})
+	return []*huh.Group{huh.NewGroup(path), huh.NewGroup(list).WithHideFunc(func() bool { return o.ImportFrom == "" })}, list
 }
 
 // previousForm asks what to bring over from a previous Mac. Each question is
@@ -95,7 +120,7 @@ func previousForm(o *domain.Options) ([]*huh.Group, *huh.MultiSelect[string]) {
 		}
 		return options
 	}, &o.PreviousBrewfile).Value(&o.PreviousPackages).Filterable(true)
-	path := huh.NewInput().Title("Previous app list (optional)").Description("A Homebrew-full.Brewfile from a Golden Gate Recovery folder, to reinstall what your previous Mac had. Leave empty to skip.").Suggestions(recoveryInventories(home)).Value(&o.PreviousBrewfile).Validate(func(s string) error {
+	path := huh.NewInput().Title("Previous app list (optional)").Description("A Homebrew-full.Brewfile from a Golden Gate Recovery folder, to reinstall what your previous Mac had. Leave empty to skip.").SuggestionsFunc(func() []string { return recoveryInventories(o.ImportFrom, home) }, &o.ImportFrom).Value(&o.PreviousBrewfile).Validate(func(s string) error {
 		if s == "" {
 			return nil
 		}

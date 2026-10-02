@@ -27,6 +27,9 @@ func (m *model) View() tea.View {
 	}
 	if m.stage == "inspecting" {
 		body = "Inspecting the current Mac…"
+		if m.options.ImportFrom != "" && len(m.options.ImportFolders) > 0 {
+			body = "Inspecting the current Mac and reading the previous home folder… Large folders can take a few minutes."
+		}
 	}
 	footer := "Esc cancels · selections remain local"
 	if m.stage == "preview" {
@@ -37,6 +40,9 @@ func (m *model) View() tea.View {
 	}
 	if m.stage == "done" {
 		footer = "↑/↓ scroll · q or Enter closes"
+		if m.continues() {
+			footer = "↑/↓ scroll · r review the rest · q or Enter closes"
+		}
 	}
 	offset := m.scroll
 	if m.follow {

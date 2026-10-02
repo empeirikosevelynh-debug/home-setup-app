@@ -53,7 +53,7 @@ func buildWindows(h domain.Host, o domain.Options, p domain.Plan) (domain.Plan, 
 	if len(o.Plugins) > 0 {
 		return p, fmt.Errorf("Fish plugins are not available on Windows")
 	}
-	if o.PreviousBrewfile != "" || len(o.PreviousPackages) > 0 {
+	if o.PreviousBrewfile != "" || len(o.PreviousPackages) > 0 || o.ImportFrom != "" || len(o.ImportFolders) > 0 {
 		return p, fmt.Errorf("bringing over a previous Mac is not available on Windows yet")
 	}
 	if o.CaptureInventory || o.PrepareRecovery {

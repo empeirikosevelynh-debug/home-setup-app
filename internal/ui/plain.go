@@ -98,7 +98,7 @@ func RunPlain(ctx context.Context, s Services, in io.Reader, out io.Writer) (dom
 	}
 	p := prompts{ctx, bufio.NewReader(in), out}
 	o := plan.DefaultOptionsFor(goos)
-	intro, question := "Migration first: restore files and settings with Migration Assistant before setup when reinstalling macOS.", "Have you restored an existing backup? (no is fine for a fresh Mac)"
+	intro, question := "Migration first: restore files and settings with Migration Assistant before setup when reinstalling macOS, or bring over only your files and apps from your previous home folder below.", "Have you restored an existing backup? (no is fine for a fresh Mac)"
 	if goos == "windows" {
 		intro, question = "Restore first: when moving to a new PC, restore your files from your backup before setup.", "Have you restored an existing backup? (no is fine for a fresh PC)"
 	}
@@ -188,19 +188,39 @@ func RunPlain(ctx context.Context, s Services, in io.Reader, out io.Writer) (dom
 		o.Workspaces = append(o.Workspaces, domain.Workspace{Language: l, Path: path, Module: name, EntryPoint: entry, Create: create})
 	}
 	if goos != "windows" {
+		if e = askImport(p, &o); e != nil {
+			return domain.Report{}, e
+		}
 		if e = askPrevious(p, &o); e != nil {
 			return domain.Report{}, e
 		}
 	}
+	for {
+		r, reviewed, e := reviewPlain(ctx, s, p, in, o)
+		if e != nil || r.Status != "complete" || reviewed.Later == "" {
+			return r, e
+		}
+		fmt.Fprintln(out, "Next: "+reviewed.Later)
+		if again, e := p.yes("Review the rest of setup now?", true); e != nil || !again {
+			return r, e
+		}
+		o.FileChoices = map[string]domain.FileDecision{}
+	}
+}
+
+// reviewPlain inspects, asks about each replacement, shows the plan and
+// applies it once accepted. Interactive installers get the terminal in.
+func reviewPlain(ctx context.Context, s Services, p prompts, in io.Reader, o domain.Options) (domain.Report, domain.Plan, error) {
+	out := p.out
 	h, e := s.Inspect(ctx, o)
 	if e != nil {
-		return domain.Report{}, e
+		return domain.Report{}, domain.Plan{}, e
 	}
 	for _, c := range conflictChanges(s, h, o) {
 		fmt.Fprintln(out, c.Path+"\n"+DiffText(h.Files[c.Path].Contents, c.Desired))
 		yes, e := p.yes("Replace this file and save a private backup?", false)
 		if e != nil {
-			return domain.Report{}, e
+			return domain.Report{}, domain.Plan{}, e
 		}
 		if yes {
 			o.FileChoices[c.Path] = domain.Replace
@@ -208,18 +228,18 @@ func RunPlain(ctx context.Context, s Services, in io.Reader, out io.Writer) (dom
 	}
 	reviewed, e := s.Build(h, o)
 	if e != nil {
-		return domain.Report{}, e
+		return domain.Report{}, reviewed, e
 	}
 	fmt.Fprintln(out, PlanText(reviewed))
 	yes, e := p.yes("Apply this reviewed plan?", false)
 	if e != nil {
-		return domain.Report{}, e
+		return domain.Report{}, reviewed, e
 	}
 	if !yes || s.Apply == nil {
-		return domain.Report{PlanID: reviewed.ID, Status: "preview", ManualTasks: reviewed.ManualTasks}, nil
+		return domain.Report{PlanID: reviewed.ID, Status: "preview", ManualTasks: reviewed.ManualTasks}, reviewed, nil
 	}
 	if !reviewed.Supported {
-		return domain.Report{}, errors.New("resolve the listed prerequisites before applying")
+		return domain.Report{}, reviewed, errors.New("resolve the listed prerequisites before applying")
 	}
 	reviewed.Accepted = true
 	if s.BindHandoff != nil {
@@ -232,7 +252,7 @@ func RunPlain(ctx context.Context, s Services, in io.Reader, out io.Writer) (dom
 	}
 	r, e := s.Apply(ctx, reviewed, func(v domain.Event) { fmt.Fprintf(out, "%s: %s\n", v.Status, v.Text) })
 	fmt.Fprintln(out, ReportText(r))
-	return r, e
+	return r, reviewed, e
 }
 
 func (p prompts) readLine() ([]byte, error) {
@@ -253,12 +273,62 @@ func (p prompts) readLine() ([]byte, error) {
 	}
 }
 
+// askImport asks for a previous home folder and which of its folders to
+// copy.
+func askImport(p prompts, o *domain.Options) error {
+	suggestion := "none"
+	if o.ImportFrom != "" {
+		suggestion = o.ImportFrom
+	} else if homes := previousHomes(); len(homes) > 0 {
+		suggestion = homes[0]
+	}
+	path, e := p.ask("Previous home folder to import from (absolute path, none skips)", suggestion)
+	if e != nil || path == "none" {
+		o.ImportFrom, o.ImportFolders = "", nil
+		return e
+	}
+	choices, e := importFolders(path)
+	if e != nil {
+		return fmt.Errorf("previous home folder: %w", e)
+	}
+	var shown, preset []string
+	for _, c := range choices {
+		label := c.label
+		if c.name == "." {
+			label = ". (the files at the top, such as .zshrc)"
+		}
+		shown = append(shown, label)
+		if c.preselect {
+			preset = append(preset, c.name)
+		}
+	}
+	if path == o.ImportFrom && len(o.ImportFolders) > 0 {
+		preset = o.ImportFolders
+	}
+	def := strings.Join(preset, ",")
+	if def == "" {
+		def = "none"
+	}
+	fmt.Fprintf(p.out, "It holds: %s\nNothing here is replaced: where a file differs, yours stays and theirs is saved in ~/%s. Folders marked keys hold private keys.\n", strings.Join(shown, ", "), plan.ConflictsFolder)
+	answer, e := p.ask("Import which? (a comma list, or none)", def)
+	if e != nil {
+		return e
+	}
+	folders, e := chooseFolders(answer, choices)
+	if e != nil || len(folders) == 0 {
+		o.ImportFrom, o.ImportFolders = "", nil
+		return e
+	}
+	o.ImportFrom, o.ImportFolders = path, folders
+	return nil
+}
+
 // askPrevious asks for the previous Mac's app list and which entries to
 // reinstall.
 func askPrevious(p prompts, o *domain.Options) error {
 	suggestion := "none"
 	home, _ := homeDir()
-	if found := recoveryInventories(home); len(found) > 0 {
+	if found := recoveryInventories(o.ImportFrom, home); len(found) > 0 {
 		suggestion = found[0]
 	}
 	path, e := p.ask("Previous app list: a Homebrew-full.Brewfile (none skips)", suggestion)

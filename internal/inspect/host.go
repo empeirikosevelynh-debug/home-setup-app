@@ -147,6 +147,9 @@ func (i Inspector) Read(ctx context.Context, o domain.Options) (domain.Host, err
 		if err = i.readPrevious(ctx, &h, o); err != nil {
 			return h, err
 		}
+		if err = readImport(&h, o); err != nil {
+			return h, err
+		}
 	}
 	for _, name := range []string{"fish", "starship", "zoxide", "chezmoi", "gh", "fzf", "fd", "bat", "eza", "rg", "delta", "lazygit", "git", "zed", "go", "gopls", "golangci-lint", "dlv", "crystal", "crystalline", "ameba", "nim", "nimble", "nimpretty", "nimlangserver"} {
 		if p, e := i.lookup(name); e == nil {

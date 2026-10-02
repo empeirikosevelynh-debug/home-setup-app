@@ -49,6 +49,22 @@ func OptionalHandlers(r command.Runner, m files.Manager) map[string]Handler {
 		}, Verify: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (bool, error) {
 			return plan.Has(h.Taps, s.Check.Target), nil
 		}},
+		"import": {Apply: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (domain.StepResult, error) {
+			if s.Import == nil {
+				return domain.StepResult{}, fmt.Errorf("import step has no reviewed folder")
+			}
+			var report func(string)
+			if reporter, ok := r.(interface{ Report(string) }); ok {
+				report = reporter.Report
+			}
+			done, e := m.Import(c, *s.Import, report)
+			return domain.StepResult{ID: s.ID, Message: importMessage(done, *s.Import)}, e
+		}, Verify: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (bool, error) {
+			if s.Import == nil {
+				return false, fmt.Errorf("import step has no reviewed folder")
+			}
+			return m.Imported(c, *s.Import)
+		}},
 		"recovery": {Apply: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (domain.StepResult, error) {
 			dir := recoveryDir(h, p)
 			var inventory string
@@ -119,4 +135,31 @@ func inventorySatisfied(m files.Manager, h domain.Host, path string) (bool, erro
 		}
 	}
 	return len(f.Contents) > 0, nil
+}
+
+// importMessage sums up what an import did.
+func importMessage(done domain.ImportScan, job domain.ImportJob) string {
+	count := func(n int, noun string) string {
+		if n == 1 {
+			return "1 " + noun
+		}
+		return fmt.Sprintf("%d %ss", n, noun)
+	}
+	parts := []string{fmt.Sprintf("Copied %s (%s)", count(done.Copy, "new file"), plan.SizeText(done.CopyBytes))}
+	if done.Same > 0 {
+		parts = append(parts, fmt.Sprintf("%d already here", done.Same))
+	}
+	if done.Differ > 0 {
+		parts = append(parts, count(done.Differ, "differing file")+" saved in "+job.Conflicts)
+	}
+	if done.Aside > 0 {
+		parts = append(parts, fmt.Sprintf("%d saved earlier", done.Aside))
+	}
+	if done.CloudOnly > 0 {
+		parts = append(parts, count(done.CloudOnly, "iCloud-only file")+" not copied")
+	}
+	if done.Special > 0 {
+		parts = append(parts, count(done.Special, "special file")+" skipped")
+	}
+	return strings.Join(parts, " · ")
 }

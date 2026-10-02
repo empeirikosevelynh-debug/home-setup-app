@@ -12,6 +12,10 @@ type Options struct {
 	// so plans that do not use them keep their IDs.
 	PreviousBrewfile string   `json:",omitempty"`
 	PreviousPackages []string `json:",omitempty"`
+	// ImportFrom is a previous home folder; ImportFolders are names directly
+	// inside it, or "." for the files at its top.
+	ImportFrom    string   `json:",omitempty"`
+	ImportFolders []string `json:",omitempty"`
 }
 type Workspace struct {
 	Language, Path, Module, EntryPoint string
@@ -34,6 +38,37 @@ type Host struct {
 	Elevated                         bool   `json:",omitempty"`
 	// Read only when a previous Mac's app list is chosen.
 	Taps, PreviousEntries, PreviousOther []string `json:",omitempty"`
+	// Read only when a previous home folder is chosen. ConflictDates names
+	// the dated folders earlier imports saved conflicts in. Free space changes
+	// all the time, so it stays out of the inspection fingerprint.
+	Import         []ImportScan `json:",omitempty"`
+	ImportProblems []string     `json:",omitempty"`
+	ConflictDates  []string     `json:",omitempty"`
+	FreeBytes      int64        `json:"-"`
+}
+
+// ImportJob copies one folder of a previous home folder into this home.
+// Existing files are never replaced: a different version is saved under
+// Conflicts instead.
+type ImportJob struct {
+	Source, Destination, Conflicts string
+	// TopFilesOnly copies only the files directly inside Source.
+	TopFilesOnly bool `json:",omitempty"`
+	// Exclude holds destination paths that another step restores.
+	Exclude []string `json:",omitempty"`
+	// Saved holds earlier conflicts folders: a copy there counts as saved.
+	Saved []string `json:",omitempty"`
+}
+
+// ImportScan counts what importing a folder would do, or did.
+// Aside counts files whose version here differs but whose source copy is
+// already saved in a conflicts folder.
+type ImportScan struct {
+	Folder                                 string
+	Copy, Same, Differ, CloudOnly, Special int
+	Aside                                  int `json:",omitempty"`
+	CopyBytes, DifferBytes                 int64
+	Digest                                 string `json:",omitempty"`
 }
 type InstalledPackage struct {
 	Version   string
@@ -80,6 +115,7 @@ type Step struct {
 	Package         *Package    `json:",omitempty"`
 	Command         *Command    `json:",omitempty"`
 	File            *FileChange `json:",omitempty"`
+	Import          *ImportJob  `json:",omitempty"`
 	Check           Check
 }
 type Plan struct {
@@ -92,6 +128,8 @@ type Plan struct {
 	Options       Options
 	Steps         []Step
 	ManualTasks   []ManualTask
+	// Later says what a second review plans once this plan is applied.
+	Later string `json:",omitempty"`
 }
 type ManualTask struct {
 	ID, Title, Instructions, URL string

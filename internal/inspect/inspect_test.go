@@ -245,3 +245,48 @@ func TestPreviousAppListRead(t *testing.T) {
 		}
 	}
 }
+func TestImportRead(t *testing.T) {
+	i, _ := fixture(t)
+	old := filepath.Join(t.TempDir(), "you")
+	for path, contents := range map[string]string{"Documents/a.txt": "a", "Documents/sub/b.txt": "bb", ".ssh/id_ed25519": "key", ".zshrc": "zsh"} {
+		os.MkdirAll(filepath.Dir(filepath.Join(old, path)), 0700)
+		os.WriteFile(filepath.Join(old, path), []byte(contents), 0600)
+	}
+	os.MkdirAll(filepath.Join(i.Home, "Imported conflicts", "2026-09-30"), 0700)
+	o := plan.DefaultOptions()
+	o.RecoveryDate = "2026-10-02"
+	o.ImportFrom, o.ImportFolders = old, []string{"Documents", ".ssh", "."}
+	before, beforeOld := snapshot(t, i.Home), snapshot(t, old)
+	h, e := i.Read(context.Background(), o)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !reflect.DeepEqual(before, snapshot(t, i.Home)) || !reflect.DeepEqual(beforeOld, snapshot(t, old)) {
+		t.Fatal("inspection wrote files")
+	}
+	if len(h.Import) != 3 || h.Import[0].Folder != "Documents" || h.Import[0].Copy != 2 || h.Import[0].CopyBytes != 3 || h.Import[1].Copy != 1 || h.Import[2].Copy != 1 || h.FreeBytes <= 0 {
+		t.Fatalf("import misread: %+v %d", h.Import, h.FreeBytes)
+	}
+	if !reflect.DeepEqual(h.ConflictDates, []string{"2026-09-30"}) {
+		t.Fatal(h.ConflictDates)
+	}
+	if p, e := plan.Build(h, o); e != nil || len(p.Steps) == 0 || p.Later == "" {
+		t.Fatal("import not planned", e)
+	}
+	os.Symlink(filepath.Join(old, "Documents"), filepath.Join(old, "Linked"))
+	for _, folders := range [][]string{{"Linked"}, {"Music"}, {"Library"}} {
+		o.ImportFolders = folders
+		if _, e := i.Read(context.Background(), o); e == nil {
+			t.Fatal("unusable folder accepted:", folders)
+		}
+	}
+	if os.Geteuid() != 0 {
+		os.Chmod(filepath.Join(old, "Documents", "sub"), 0)
+		defer os.Chmod(filepath.Join(old, "Documents", "sub"), 0700)
+		o.ImportFolders = []string{"Documents"}
+		h, e := i.Read(context.Background(), o)
+		if e != nil || len(h.ImportProblems) != 1 || len(h.Import) != 0 {
+			t.Fatal("unreadable folder not reported", e, h.ImportProblems)
+		}
+	}
+}

@@ -74,6 +74,7 @@ func cloneOptions(o domain.Options) domain.Options {
 	o.Languages = append([]string(nil), o.Languages...)
 	o.Workspaces = append([]domain.Workspace(nil), o.Workspaces...)
 	o.PreviousPackages = append([]string(nil), o.PreviousPackages...)
+	o.ImportFolders = append([]string(nil), o.ImportFolders...)
 	m := map[string]domain.FileDecision{}
 	for k, v := range o.FileChoices {
 		m[k] = v
@@ -89,7 +90,19 @@ func newModel(ctx context.Context, s Services) *model {
 	o := plan.DefaultOptionsFor(goos)
 	return &model{ctx: ctx, services: s, options: o, draft: cloneOptions(o), dark: true, stage: "welcome"}
 }
-func (m *model) commitDraft() { m.options = cloneOptions(m.draft) }
+func (m *model) commitDraft() { m.options = settled(cloneOptions(m.draft)) }
+
+// settled drops choices whose source was cleared after they were made: a
+// hidden list keeps its last selection.
+func settled(o domain.Options) domain.Options {
+	if o.ImportFrom == "" {
+		o.ImportFolders = nil
+	}
+	if o.PreviousBrewfile == "" {
+		o.PreviousPackages = nil
+	}
+	return o
+}
 func (m *model) cancelDraft() {
 	m.draft = cloneOptions(m.options)
 	m.form = nil
@@ -196,6 +209,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if v.err != nil {
 			m.lines += "\n" + v.err.Error()
 		}
+		if m.continues() {
+			m.lines += "\nNext: " + m.preview.Later + " Press r to review it now.\n"
+		}
 		if m.ctx.Err() != nil {
 			return m, tea.Quit
 		}
@@ -253,8 +269,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.stage == "done" {
-			if v.String() == "q" || v.String() == "enter" {
+			switch {
+			case v.String() == "q" || v.String() == "enter":
 				return m, tea.Quit
+			case v.String() == "r" && m.continues():
+				m.report = domain.Report{}
+				m.stage = "inspecting"
+				return m, m.inspectCmd()
 			}
 			return m, nil
 		}
@@ -338,6 +359,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 func (m *model) readEvent() tea.Cmd { return func() tea.Msg { return <-m.events } }
+
+// continues reports whether the applied plan left the rest of setup for a
+// second review.
+func (m *model) continues() bool {
+	return m.err == nil && m.report.Status == "complete" && m.preview.Later != ""
+}
 
 // reject returns to the choices after an inspection or plan fails, keeping
 // them so a mistyped path or module can be corrected instead of starting over.
@@ -426,6 +453,9 @@ func PlanText(p domain.Plan) string {
 	}
 	for i, s := range p.Steps {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, s.Label)
+	}
+	if p.Later != "" {
+		fmt.Fprintln(&b, "Then: "+p.Later)
 	}
 	fmt.Fprintln(&b, "\nManual follow-up:")
 	for _, s := range p.ManualTasks {

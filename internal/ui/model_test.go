@@ -19,6 +19,9 @@ import (
 // with onWindows.
 func TestMain(m *testing.M) {
 	goos = "darwin"
+	// Suggestions must not depend on the machine running the tests.
+	homeDir = func() (string, error) { return "/nonexistent/home", nil }
+	volumesDir = "/nonexistent/Volumes"
 	os.Exit(m.Run())
 }
 func services(t *testing.T) Services {

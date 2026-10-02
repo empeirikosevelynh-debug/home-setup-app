@@ -119,6 +119,15 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 	if err := addPrevious(&p, h, o, handled, pkg, add); err != nil {
 		return p, err
 	}
+	later, err := addImport(&p, h, o, add)
+	if err != nil {
+		return p, err
+	}
+	if later {
+		p.Later = "Configuration files, Git, Fish plugins, project workspaces, language tools, chezmoi and recovery records are planned in a second review, once the imported files are here."
+		p.ID, err = Fingerprint(p)
+		return p, err
+	}
 	config := []configFile{{"fish/config.fish", filepath.Join(h.Home, ".config/fish/config.fish")}, {"starship.toml", filepath.Join(h.Home, ".config/starship.toml")}, {"zed/settings.example.json", filepath.Join(h.Home, ".config/zed/settings.json")}, {"lazygit/config.yml", filepath.Join(h.LazyGitDir, "config.yml")}}
 	if o.PrepareRecovery && Has(o.Apps, "kopiaui") {
 		config = append(config, configFile{"recovery/kopiaignore", filepath.Join(h.Home, ".kopiaignore")})
