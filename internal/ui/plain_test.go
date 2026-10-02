@@ -34,9 +34,25 @@ func TestPlainAnswersRemainSeparate(t *testing.T) {
 func TestCorruptSavedSessionIsReported(t *testing.T) {
 	s := services(t)
 	s.LoadLatest = func() (domain.Session, error) { return domain.Session{}, errors.New("invalid saved session") }
-	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\nno\n"), io.Discard)
-	if err == nil || !strings.Contains(err.Error(), "invalid saved session") {
-		t.Fatal("damaged session silently ignored", err)
+	var out bytes.Buffer
+	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\nno\n"), &out)
+	if err != nil {
+		t.Fatal("damaged session blocked setup", err)
+	}
+	if !strings.Contains(out.String(), "invalid saved session") {
+		t.Fatal("damaged session silently ignored")
+	}
+}
+func TestPlainProjectNameHasNoPlaceholder(t *testing.T) {
+	s := services(t)
+	path := t.TempDir() + "/project"
+	var out bytes.Buffer
+	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnim\nno\nno\nno\nno\n"+path+"\n\nyes\n"), &out)
+	if err == nil || !strings.Contains(err.Error(), "project/binary name") {
+		t.Fatal("empty project name was not rejected", err)
+	}
+	if !strings.Contains(out.String(), "Project/binary name: ") {
+		t.Fatal("project name prompt offers a placeholder default")
 	}
 }
 func TestPlainEOF(t *testing.T) {

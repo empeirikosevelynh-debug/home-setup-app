@@ -32,7 +32,8 @@ func (s SessionStore) manager() (files.Manager, error) {
 	if root == "" {
 		root = filepath.Dir(s.Dir)
 	}
-	return files.Manager{Roots: []string{root}}, nil
+	// A session record only grows; its earlier versions are not worth a backup.
+	return files.Manager{Roots: []string{root}, SkipBackup: true}, nil
 }
 func (s SessionStore) Load(id string) (domain.Session, error) {
 	var result domain.Session
@@ -104,7 +105,11 @@ func (s SessionStore) Latest() (domain.Session, error) {
 		return domain.Session{}, os.ErrNotExist
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].time > candidates[j].time })
-	return s.Load(candidates[0].id)
+	session, e := s.Load(candidates[0].id)
+	if e != nil {
+		return session, fmt.Errorf("%s: %w", s.Path(candidates[0].id), e)
+	}
+	return session, nil
 }
 func (s SessionStore) Save(value domain.Session) error {
 	if value.SchemaVersion != 1 || value.Plan.SchemaVersion != 1 || !sessionID.MatchString(value.Plan.ID) {

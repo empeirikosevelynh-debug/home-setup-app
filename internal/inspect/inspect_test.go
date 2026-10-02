@@ -154,3 +154,22 @@ func TestAppsAndReceipts(t *testing.T) {
 		t.Fatal("app channel metadata lost")
 	}
 }
+func TestFisherStateFromUniversalStore(t *testing.T) {
+	i, f := fixture(t)
+	path := filepath.Join(i.Home, ".config/fish/fish_variables")
+	os.MkdirAll(filepath.Dir(path), 0700)
+	os.WriteFile(path, []byte("# This file contains fish universal variable definitions.\n# VERSION: 3.0\nSETUVAR __fish_initialized:3800\nSETUVAR _fisher_plugins:jorgebucaran/fisher\\x1ePatrickF1/fzf\\x2efish\\x1ecaf\\u00e9/plugin\nSETUVAR --export --path EXAMPLE:/a\\x1e/b\n"), 0600)
+	h := read(t, i)
+	if !reflect.DeepEqual(h.FishInstalledPlugins, []string{"jorgebucaran/fisher", "PatrickF1/fzf.fish", "café/plugin"}) || h.FishLegacy {
+		t.Fatalf("stored plugins misread: %q %v", h.FishInstalledPlugins, h.FishLegacy)
+	}
+	for _, c := range f.Calls {
+		if c.Path != brew {
+			t.Fatal("fish ran to read its own store", c)
+		}
+	}
+	os.WriteFile(path, []byte("SETUVAR _fisher_list:a\\x1eb\n"), 0600)
+	if h = read(t, i); !h.FishLegacy || len(h.FishInstalledPlugins) != 0 {
+		t.Fatal("legacy Fisher state missed")
+	}
+}

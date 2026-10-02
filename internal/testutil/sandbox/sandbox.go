@@ -188,11 +188,19 @@ func (s *Sandbox) Run(ctx context.Context, c domain.Command, w io.Writer) error 
 			if at < 0 || at >= len(c.Args) {
 				return fmt.Errorf("missing Fisher selection")
 			}
+			if plan.Has(c.Args, "--no-config") {
+				return fmt.Errorf("fish --no-config cannot save Fisher's universal variables")
+			}
 			s.plugins = append([]string(nil), c.Args[at:]...)
+			var stored []string
+			for _, p := range s.plugins {
+				stored = append(stored, fishEscape(p))
+			}
+			variables := "# This file contains fish universal variable definitions.\n# VERSION: 3.0\nSETUVAR _fisher_plugins:" + strings.Join(stored, "\\x1e") + "\n"
+			if e := os.WriteFile(filepath.Join(s.Home, ".config/fish/fish_variables"), []byte(variables), 0644); e != nil {
+				return e
+			}
 			return os.WriteFile(filepath.Join(s.Home, ".config/fish/fish_plugins"), []byte(strings.Join(s.plugins, "\n")+"\n"), 0644)
-		}
-		if strings.Contains(script, "$_fisher_plugins") {
-			io.WriteString(w, strings.Join(s.plugins, "\n"))
 		}
 	case c.Path == "/fake/chezmoi":
 		if len(c.Args) == 0 {
@@ -252,6 +260,19 @@ func (s *Sandbox) Run(ctx context.Context, c domain.Command, w io.Writer) error 
 		return fmt.Errorf("fixture refuses unknown command %s", c.Path)
 	}
 	return nil
+}
+
+// fishEscape writes a value the way fish stores it in fish_variables.
+func fishEscape(v string) string {
+	var b strings.Builder
+	for _, r := range v {
+		if r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '/' || r == '_' {
+			b.WriteRune(r)
+		} else {
+			fmt.Fprintf(&b, "\\x%.2x", r)
+		}
+	}
+	return b.String()
 }
 func (s *Sandbox) Migrated() {
 	os.MkdirAll(filepath.Join(s.Home, "Applications/Zed.app/Contents/_MASReceipt"), 0700)
