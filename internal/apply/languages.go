@@ -11,11 +11,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 func tool(h domain.Host, name string) string {
 	if h.Tools[name] != "" {
 		return h.Tools[name]
+	}
+	if h.OS == "windows" {
+		return filepath.Join(filepath.Dir(h.ChocoPath), name+".exe")
 	}
 	return filepath.Join("/opt/homebrew/bin", name)
 }
@@ -48,7 +52,14 @@ func nimBin(h domain.Host) string {
 	}
 	return filepath.Join(base, "bin")
 }
+
+// executable reports whether path is a program. Windows has no execute
+// bits; its programs end in .exe.
 func executable(path string) bool {
+	if runtime.GOOS == "windows" {
+		st, e := os.Stat(path + ".exe")
+		return e == nil && st.Mode().IsRegular()
+	}
 	st, e := os.Stat(path)
 	return e == nil && st.Mode().IsRegular() && st.Mode().Perm()&0111 != 0
 }

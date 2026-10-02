@@ -29,6 +29,22 @@ func DefaultOptions() domain.Options {
 		Apps: []string{"warp", "zed", "applite"}, Plugins: append([]string(nil), StartingPlugins...), ConfigureGit: true, AdoptChezmoi: true, CaptureInventory: true, PrepareRecovery: true, FileChoices: map[string]domain.FileDecision{}}
 }
 
+// AppFor names the app a package installs (a catalog key such as "zed"),
+// or returns "" for a command-line package.
+func AppFor(q domain.Package) string {
+	switch q.Kind {
+	case "cask":
+		return q.Token
+	case "choco":
+		for app, id := range WindowsAppPackages {
+			if id == q.Token {
+				return app
+			}
+		}
+	}
+	return ""
+}
+
 // Choice is what the wizard offers on one platform.
 type Choice struct{ Apps, Plugins, Languages []string }
 

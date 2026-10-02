@@ -151,3 +151,10 @@ func TestWindowsLanguages(t *testing.T) {
 		t.Fatal("languages not planned", golang, tools, found)
 	}
 }
+func TestAppForPackages(t *testing.T) {
+	for q, want := range map[domain.Package]string{{Kind: "cask", Token: "zed"}: "zed", {Kind: "choco", Token: "zed-editor"}: "zed", {Kind: "choco", Token: "warp-terminal"}: "warp", {Kind: "choco", Token: "git"}: "", {Kind: "formula", Token: "fish"}: ""} {
+		if got := plan.AppFor(q); got != want {
+			t.Fatal(q, got)
+		}
+	}
+}

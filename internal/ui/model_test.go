@@ -243,3 +243,40 @@ func TestApplyingViewFollowsOutput(t *testing.T) {
 		t.Fatal("view did not follow again at the end")
 	}
 }
+func onWindows(t *testing.T) {
+	old := goos
+	goos = "windows"
+	t.Cleanup(func() { goos = old })
+}
+func TestWindowsSelectionOffersWindowsChoices(t *testing.T) {
+	onWindows(t)
+	m := newModel(context.Background(), services(t))
+	m.width, m.height = 80, 24
+	if strings.Join(m.options.Apps, ",") != "warp,zed" || len(m.options.Plugins) != 0 || m.options.CaptureInventory || m.options.PrepareRecovery {
+		t.Fatalf("not the Windows defaults: %+v", m.options)
+	}
+	m.edit()
+	if len(m.lists) != 2 || m.draft.Workspaces != nil {
+		t.Fatal("Fish plugins or workspaces offered on Windows")
+	}
+	run(m, m.form.Init())
+	if view := m.View().Content; !strings.Contains(view, "Chocolatey") || strings.Contains(view, "applite") {
+		t.Fatal("macOS application choices shown on Windows:\n" + view)
+	}
+}
+
+// run feeds a command's messages back into the model, as the program would.
+func run(m *model, cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			run(m, c)
+		}
+	case nil:
+	default:
+		m.Update(msg)
+	}
+}

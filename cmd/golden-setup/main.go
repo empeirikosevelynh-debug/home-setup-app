@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"runtime"
 )
 
 func runWith(ctx context.Context, args []string, in io.Reader, out, errOut io.Writer, probe func(context.Context, domain.Options) (domain.Host, error)) int {
@@ -22,7 +23,7 @@ func runWith(ctx context.Context, args []string, in io.Reader, out, errOut io.Wr
 	accessible := flags.Bool("accessible", false, "use plain prompts")
 	version := flags.Bool("version", false, "show version and build provenance")
 	flags.Usage = func() {
-		fmt.Fprint(errOut, "Golden Gate Setup — reviewed first-time setup for native Apple-silicon macOS 27.\n\nUsage: golden-setup [--plan | --accessible | --version | --help]\n\nThe default opens a wizard. Review and accept its plan before installation.\n--plan only inspects and prints JSON; it does not install or save sessions.\n\n")
+		fmt.Fprint(errOut, "Golden Gate Setup — reviewed first-time setup for native Apple-silicon macOS 27 (Homebrew) and Windows 11 (Chocolatey, preview).\n\nUsage: golden-setup [--plan | --accessible | --version | --help]\n\nThe default opens a wizard. Review and accept its plan before installation.\n--plan only inspects and prints JSON; it does not install or save sessions.\n\n")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -58,7 +59,7 @@ func runWith(ctx context.Context, args []string, in io.Reader, out, errOut io.Wr
 		fmt.Fprintln(errOut, "Inspection service is unavailable.")
 		return 1
 	}
-	options := plan.DefaultOptions()
+	options := plan.DefaultOptionsFor(runtime.GOOS)
 	host, err := probe(ctx, options)
 	if err != nil {
 		fmt.Fprintln(errOut, err)
