@@ -1,0 +1,10 @@
+# Root-relative paths in this home-directory backup
+/Library/Caches/
+/Library/Logs/
+/Library/Containers/*/Data/Library/Caches/
+/.Trash/
+/.npm/_cacache/
+
+# Finder metadata, wherever it occurs
+.DS_Store
+.localized

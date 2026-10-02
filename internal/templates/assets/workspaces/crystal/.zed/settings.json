@@ -1,0 +1,14 @@
+{
+  "languages": {
+    "Crystal": {
+      "tab_size": 2,
+      "format_on_save": "on",
+      "formatter": {
+        "external": {
+          "command": "crystal",
+          "arguments": ["tool", "format", "-"]
+        }
+      }
+    }
+  }
+}

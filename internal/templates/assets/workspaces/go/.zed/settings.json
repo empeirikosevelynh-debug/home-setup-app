@@ -1,0 +1,29 @@
+{
+  "inlay_hints": { "enabled": true },
+  "languages": {
+    "Go": {
+      "format_on_save": "on",
+      "formatter": [
+        { "code_action": "source.organizeImports" },
+        "language_server"
+      ]
+    }
+  },
+  "lsp": {
+    "gopls": {
+      "initialization_options": {
+        "gofumpt": true,
+        "staticcheck": true,
+        "hints": {
+          "assignVariableTypes": true,
+          "compositeLiteralFields": true,
+          "compositeLiteralTypes": true,
+          "constantValues": true,
+          "functionTypeParameters": true,
+          "parameterNames": true,
+          "rangeVariableTypes": true
+        }
+      }
+    }
+  }
+}

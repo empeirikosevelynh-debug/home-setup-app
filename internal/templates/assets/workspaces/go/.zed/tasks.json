@@ -1,0 +1,32 @@
+[
+  {
+    "label": "go: run",
+    "command": "go run .",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "go: test",
+    "command": "go test -v ./...",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "go: coverage",
+    "command": "go test -coverprofile=coverage.out ./...; and go tool cover -html=coverage.out",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "go: lint",
+    "command": "golangci-lint run",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "go: build",
+    "command": "mkdir -p bin; and go build -v -o bin/app .",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "allow_concurrent_runs": false
+  }
+]

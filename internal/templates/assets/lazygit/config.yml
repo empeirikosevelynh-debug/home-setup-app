@@ -1,0 +1,32 @@
+# For lazygit 0.65.1; see the guide for version and configuration-path details.
+git:
+  diffRenderers:
+    - name: delta
+      colorArg: always
+      command: delta --paging=never
+
+os:
+  editPreset: zed
+
+customCommands:
+  - key: '<c-p>'
+    context: localBranches
+    description: 'Create PR for the checked-out branch'
+    command: 'gh pr create --web'
+    output: terminal
+
+  - key: 'O'
+    context: localBranches
+    description: 'View PR for the selected branch'
+    command: 'gh pr view {{.SelectedLocalBranch.Name | quote}} --web'
+
+  - key: 'C'
+    context: localBranches
+    description: 'Check PR for the selected branch'
+    command: 'gh pr checks {{.SelectedLocalBranch.Name | quote}}'
+    output: terminal
+
+  - key: '<c-r>'
+    context: localBranches
+    description: 'Open repository on GitHub'
+    command: 'gh repo view --web'

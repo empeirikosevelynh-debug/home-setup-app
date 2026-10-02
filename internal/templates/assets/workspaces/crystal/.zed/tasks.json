@@ -1,0 +1,32 @@
+[
+  {
+    "label": "crystal: run",
+    "command": "crystal run src/my_crystal_app.cr",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "crystal: test",
+    "command": "crystal spec",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "crystal: lint",
+    "command": "ameba",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "crystal: install dependencies",
+    "command": "shards install",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "allow_concurrent_runs": false
+  },
+  {
+    "label": "crystal: build release",
+    "command": "shards build --release",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "allow_concurrent_runs": false
+  }
+]

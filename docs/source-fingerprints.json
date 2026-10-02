@@ -1,0 +1,86 @@
+{
+  "recorded_date": "2026-09-29",
+  "purpose": "Read-only reference provenance for the design proposal; not an install manifest.",
+  "inputs": [
+    {
+      "path": "~/Desktop/guide-refined.pdf",
+      "bytes": 128380,
+      "sha256": "c3211cb716a5860aa399386ebd3c835bb5d38302939a488f08c51e5335055317"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-setup-guide.md",
+      "bytes": 56824,
+      "sha256": "870ae437183605c59b1e8c77a4eac98d035bdf1a24d5b0aba3f47e435dacb338"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-config/Brewfile",
+      "bytes": 755,
+      "sha256": "f1b652d2fbbebe6932752cfb68971169762511350978333a14408f2419609b72"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-config/README.md",
+      "bytes": 4715,
+      "sha256": "8eabc5af74a22b33155abe41da86fa4116391ae6aceb3a007e08ddaee7ac91f3"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-config/app-recovery-inventory.md",
+      "bytes": 12488,
+      "sha256": "a253cdd6ffcf130a0fb9c0256ccccc31a42efffd63b6c8277077158545784cbb"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-config/fish/config.fish",
+      "bytes": 1200,
+      "sha256": "19ed810648e0fe293b2e8f78be497cecc3cd84e6c52b4ea64c4ddc7c915af517"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-config/fish/fish_plugins",
+      "bytes": 242,
+      "sha256": "86fe35f2bd507c43d3ac0f8e55723e957fe698facd5e8b3a0e6f62e00a8fc399"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-config/lazygit/config.yml",
+      "bytes": 840,
+      "sha256": "16ce5ead74d5a7ba87a6a51c71d842006d8d210ed8da68f26d4290a7e722292f"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-config/starship.toml",
+      "bytes": 294,
+      "sha256": "acc6e6619b21ed50a7d7c6acffa898c7c11ae1c0850f3b7301c60a7df434f169"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-config/workspaces/crystal/.zed/settings.json",
+      "bytes": 239,
+      "sha256": "89fa7ba7c652e6d995a5e2db28aea017ed9bec9530c68f51df51fa366e3900a6"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-config/workspaces/crystal/.zed/tasks.json",
+      "bytes": 743,
+      "sha256": "698e59f0aa7a3ed87d9c888ac0a4bf54fc9059d23335148cd20d3a3b64e6bd8c"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-config/workspaces/go/.zed/settings.json",
+      "bytes": 650,
+      "sha256": "74a159fd960339b2005e323c042407b41fbfff36a39986e2248576319d85fc1c"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-config/workspaces/go/.zed/tasks.json",
+      "bytes": 773,
+      "sha256": "20ef371730259c2dbf25784947251989003e06111e839a3b530341e82c7043be"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-config/workspaces/nim/.zed/settings.json",
+      "bytes": 239,
+      "sha256": "5628c3bc3ae45b4a198ed09853317b133ed15d48f39d4001da5e8a42c844cb95"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-config/workspaces/nim/.zed/tasks.json",
+      "bytes": 617,
+      "sha256": "16a840b7ee0894ae20cb38ba0e083b5b846d84b53aa34c4bb3e8b87aad2ac741"
+    },
+    {
+      "path": "~/home folder setup - macos/warp-fish-zed-config/zed/settings.example.json",
+      "bytes": 714,
+      "sha256": "369b962892b9df95c12c5c82088728bdad1e1b5764feaa487abea9acd6292538"
+    }
+  ]
+}

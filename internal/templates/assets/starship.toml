@@ -1,0 +1,21 @@
+format = "$directory$git_branch$git_status$python$cmd_duration$status$character"
+add_newline = false
+
+[line_break]
+disabled = true
+
+[directory]
+read_only = " ro"
+
+[git_branch]
+symbol = "git:"
+
+[python]
+symbol = "py "
+
+[cmd_duration]
+min_time = 5000
+
+[status]
+disabled = false
+pipestatus = true
