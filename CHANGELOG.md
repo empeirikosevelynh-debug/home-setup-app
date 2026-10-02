@@ -10,6 +10,7 @@
 - Plain mode no longer defaults project names to `none`.
 - Steps that are already satisfied no longer re-inspect the Mac, a vendor app found during apply is reported once, and session saves no longer accumulate backups.
 - Build outputs and local machine files are no longer tracked.
+- The repository opens in Zed with project settings, tasks and debug setups. The installer's workspace templates are stored outside `.zed/` folders, so Zed no longer loads them as live configuration.
 
 ## 0.1.0-rc.1 — 2026-09-30
 

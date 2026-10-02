@@ -22,32 +22,32 @@
       "sha256": "16ce5ead74d5a7ba87a6a51c71d842006d8d210ed8da68f26d4290a7e722292f"
     },
     {
-      "asset": "workspaces/go/.zed/settings.json",
+      "asset": "workspaces/go/zed/settings.json",
       "source": "warp-fish-zed-config/workspaces/go/.zed/settings.json",
       "sha256": "74a159fd960339b2005e323c042407b41fbfff36a39986e2248576319d85fc1c"
     },
     {
-      "asset": "workspaces/go/.zed/tasks.json",
+      "asset": "workspaces/go/zed/tasks.json",
       "source": "warp-fish-zed-config/workspaces/go/.zed/tasks.json",
       "sha256": "20ef371730259c2dbf25784947251989003e06111e839a3b530341e82c7043be"
     },
     {
-      "asset": "workspaces/crystal/.zed/settings.json",
+      "asset": "workspaces/crystal/zed/settings.json",
       "source": "warp-fish-zed-config/workspaces/crystal/.zed/settings.json",
       "sha256": "89fa7ba7c652e6d995a5e2db28aea017ed9bec9530c68f51df51fa366e3900a6"
     },
     {
-      "asset": "workspaces/crystal/.zed/tasks.json",
+      "asset": "workspaces/crystal/zed/tasks.json",
       "source": "warp-fish-zed-config/workspaces/crystal/.zed/tasks.json",
       "sha256": "698e59f0aa7a3ed87d9c888ac0a4bf54fc9059d23335148cd20d3a3b64e6bd8c"
     },
     {
-      "asset": "workspaces/nim/.zed/settings.json",
+      "asset": "workspaces/nim/zed/settings.json",
       "source": "warp-fish-zed-config/workspaces/nim/.zed/settings.json",
       "sha256": "5628c3bc3ae45b4a198ed09853317b133ed15d48f39d4001da5e8a42c844cb95"
     },
     {
-      "asset": "workspaces/nim/.zed/tasks.json",
+      "asset": "workspaces/nim/zed/tasks.json",
       "source": "warp-fish-zed-config/workspaces/nim/.zed/tasks.json",
       "sha256": "16a840b7ee0894ae20cb38ba0e083b5b846d84b53aa34c4bb3e8b87aad2ac741"
     },

@@ -71,6 +71,20 @@ python3 -m unittest discover -s scripts -p '*_test.py'
 zsh -n scripts/bootstrap.zsh
 ```
 
+### Develop in Zed
+
+Clone and open the project in Zed 0.219.4 or later in one step:
+
+```sh
+open 'zed://git/clone?repo=https://github.com/empeirikosevelynh-debug/home-setup-app.git'
+```
+
+You can also use **git: clone** from the command palette, or run `zed .` in an existing clone. Zed opens a new project in Restricted Mode: review `.zed/`, then trust the project to turn on its settings, the Go language server and its tasks.
+
+- **Tasks** (`task: spawn`): tests, race tests, vet, the gofmt check, build, the read-only `--plan` preview, the wizard and plain prompts against the sandbox fixture, terminal smoke tests, and script checks. No task runs the real wizard. Task commands work in fish, zsh and bash; the sandbox tasks need macOS.
+- **Debugging** (Delve, `brew install delve`): the read-only preview, the tests in the current file's package, and any test or `main` from the gutter.
+- **Formatting:** Go files are formatted with gofmt on save. Other files, including the embedded templates, are left as written.
+
 See [verification](docs/verification.md), [contributing](CONTRIBUTING.md), [security](SECURITY.md), and [local release packaging](docs/releasing.md). Packaging creates a native archive, matching source archive, build/module inventory, dependency licenses, and SHA-256 checksums from a clean commit. It never publishes. The module has a local name; choose a real public repository identity before offering `go install` instructions.
 
 Application code uses the [MIT license](LICENSE); dependencies retain their terms in [third-party notices](THIRD_PARTY.md). The original guide, PDF, and configuration examples are read-only references and are not runtime requirements.

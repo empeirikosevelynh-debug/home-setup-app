@@ -1,0 +1,19 @@
+[
+  {
+    "label": "golden-setup: debug the read-only preview",
+    "adapter": "Delve",
+    "request": "launch",
+    "mode": "debug",
+    "program": "$ZED_WORKTREE_ROOT/cmd/golden-setup",
+    "args": ["--plan"],
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "golden-setup: debug the tests in this package",
+    "adapter": "Delve",
+    "request": "launch",
+    "mode": "test",
+    "program": "$ZED_DIRNAME",
+    "cwd": "$ZED_DIRNAME"
+  }
+]

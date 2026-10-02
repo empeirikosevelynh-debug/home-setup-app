@@ -9,7 +9,7 @@ import (
 func TestWorkspaceTemplatesEmbedded(t *testing.T) {
 	for _, lang := range []string{"go", "crystal", "nim"} {
 		for _, file := range []string{"settings.json", "tasks.json"} {
-			data, err := templates.Load("workspaces/" + lang + "/.zed/" + file)
+			data, err := templates.Load("workspaces/" + lang + "/zed/" + file)
 			if err != nil {
 				t.Fatal(err)
 			}

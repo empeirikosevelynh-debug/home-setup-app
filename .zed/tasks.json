@@ -1,0 +1,59 @@
+[
+  {
+    "label": "golden-setup: test",
+    "command": "go test ./...",
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "golden-setup: test with race detector",
+    "command": "go test -race -count=1 ./...",
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "golden-setup: test this package",
+    "command": "go test .",
+    "cwd": "$ZED_DIRNAME"
+  },
+  {
+    "label": "golden-setup: vet",
+    "command": "go vet ./...",
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "golden-setup: list files gofmt would change",
+    "command": "gofmt -l cmd internal scripts",
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "golden-setup: build",
+    "command": "go build -o bin/golden-setup ./cmd/golden-setup",
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "golden-setup: preview plan (read-only)",
+    "command": "go run ./cmd/golden-setup --plan",
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "golden-setup: try the wizard in a sandbox",
+    "command": "go run ./internal/testutil/cmd/fixture",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": true
+  },
+  {
+    "label": "golden-setup: try plain prompts in a sandbox",
+    "command": "go run ./internal/testutil/cmd/fixture --accessible",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "use_new_terminal": true
+  },
+  {
+    "label": "golden-setup: terminal smoke tests",
+    "command": "go build -o bin/golden-setup-fixture ./internal/testutil/cmd/fixture && python3 scripts/pty-smoke.py --fixture bin/golden-setup-fixture",
+    "cwd": "$ZED_WORKTREE_ROOT"
+  },
+  {
+    "label": "golden-setup: script checks",
+    "command": "python3 -m unittest discover -s scripts -p '*_test.py' && zsh -n scripts/bootstrap.zsh",
+    "cwd": "$ZED_WORKTREE_ROOT"
+  }
+]

@@ -28,6 +28,9 @@ go.work.sum
 /bin/
 /dist/
 
+# Delve writes these when it builds for a debug session
+__debug_bin*
+
 # Local metadata
 .DS_Store
 __pycache__/

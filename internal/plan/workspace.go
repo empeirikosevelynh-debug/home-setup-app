@@ -40,7 +40,7 @@ func workspaceChanges(h domain.Host, w domain.Workspace, choices map[string]doma
 	}
 	desired := map[string][]byte{}
 	for _, name := range []string{"settings.json", "tasks.json"} {
-		data, e := templates.Load("workspaces/" + w.Language + "/.zed/" + name)
+		data, e := templates.Load("workspaces/" + w.Language + "/zed/" + name)
 		if e != nil {
 			return nil, e
 		}
