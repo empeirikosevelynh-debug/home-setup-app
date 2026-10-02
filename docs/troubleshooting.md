@@ -24,4 +24,16 @@
 
 **Plain-input failure:** each answer needs a newline. Installation needs an interactive terminal; buffered pipes cannot transfer ownership for password prompts. Plain prompts do not by themselves prove VoiceOver usability.
 
+## Windows preview
+
+**"Run setup from a terminal opened with Run as administrator":** Chocolatey installs for the whole PC. Open Warp or PowerShell with Run as administrator and inspect again.
+
+**A tool installed during setup is not found:** installers update the saved PATH, not open windows. Setup also searches the saved PATH and Chocolatey's `bin` folder; open a new terminal before using the tools yourself.
+
+**Weaker file checks than macOS:** Windows has no equivalent of the descriptor-based writes used on macOS. Setup refuses links and junctions on the way to every file and checks again just before replacing it, but a link created in between could still redirect a write. Run setup when nothing else is changing your configuration folders.
+
+**Private files:** Windows does not use permission bits. Sessions and backups live in `%LOCALAPPDATA%\Golden Gate Setup` and rely on your profile's default access, which is limited to you and administrators.
+
+**Delve and Crystal:** Chocolatey has no package for either. The summary lists `go install` for Delve; Crystal is not offered on Windows.
+
 **Different app inventories:** confirm executable paths, refresh/relaunch, and remember that changing prefixes does not migrate registrations. Vendor/App Store apps retain their channels. See [recovery](recovery.md).

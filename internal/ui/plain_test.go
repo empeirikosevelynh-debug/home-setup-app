@@ -8,6 +8,7 @@ import (
 	"golden-gate-setup/internal/plan"
 	"golden-gate-setup/internal/testutil"
 	"io"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -46,6 +47,9 @@ func TestCorruptSavedSessionIsReported(t *testing.T) {
 	}
 }
 func TestPlainProjectNameHasNoPlaceholder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("workspaces are macOS-only; plain mode takes /-rooted paths")
+	}
 	s := services(t)
 	path := t.TempDir() + "/project"
 	var out bytes.Buffer

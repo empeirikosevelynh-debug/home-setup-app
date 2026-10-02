@@ -178,7 +178,7 @@ func windowsFixture(t *testing.T, version, list string) (inspect.Inspector, *tes
 	h := testutil.FreshWindowsHost(t.TempDir())
 	choco := inspect.ChocolateyPath("")
 	f := &testutil.FakeRunner{Responses: map[string]testutil.Response{choco + " --version": {Output: version + "\n"}, choco + " list --limit-output": {Output: list}}}
-	i := inspect.Inspector{Home: h.Home, Runner: f, Platform: func(context.Context) (domain.Host, error) { return h, nil }, Lookup: func(p string) (string, error) {
+	i := inspect.Inspector{Home: h.Home, Runner: f, Getenv: func(string) string { return "" }, Platform: func(context.Context) (domain.Host, error) { return h, nil }, Lookup: func(p string) (string, error) {
 		if p == choco {
 			return choco, nil
 		}

@@ -23,6 +23,14 @@ type Inspector struct {
 	Platform func(context.Context) (domain.Host, error)
 	Lookup   func(string) (string, error)
 	AppsDirs []string
+	Getenv   func(string) string
+}
+
+func (i Inspector) getenv(name string) string {
+	if i.Getenv != nil {
+		return i.Getenv(name)
+	}
+	return os.Getenv(name)
 }
 
 func (i Inspector) capture(ctx context.Context, path string, args ...string) (string, error) {
@@ -103,7 +111,7 @@ func (i Inspector) Read(ctx context.Context, o domain.Options) (domain.Host, err
 		return h, fmt.Errorf("home directory must be absolute")
 	}
 	h.Home = filepath.Clean(h.Home)
-	h.ConfigHome = os.Getenv("XDG_CONFIG_HOME")
+	h.ConfigHome = i.getenv("XDG_CONFIG_HOME")
 	h.BrewPath, h.BrewPrefix = "", ""
 	h.Packages = map[string]domain.InstalledPackage{}
 	h.Files = map[string]domain.FileState{}
@@ -111,12 +119,12 @@ func (i Inspector) Read(ctx context.Context, o domain.Options) (domain.Host, err
 	h.Tools = map[string]string{}
 	h.LazyGitDir = filepath.Join(h.Home, "Library/Application Support/lazygit")
 	if h.OS == "windows" {
-		h.AppData = os.Getenv("APPDATA")
+		h.AppData = i.getenv("APPDATA")
 		if !filepath.IsAbs(h.AppData) {
 			h.AppData = filepath.Join(h.Home, "AppData", "Roaming")
 		}
 		h.LazyGitDir = filepath.Join(h.AppData, "lazygit")
-		if err = i.readChocolatey(ctx, &h, os.Getenv("ChocolateyInstall")); err != nil {
+		if err = i.readChocolatey(ctx, &h, i.getenv("ChocolateyInstall")); err != nil {
 			return h, err
 		}
 	} else if p, e := i.lookup("/opt/homebrew/bin/brew"); e == nil {

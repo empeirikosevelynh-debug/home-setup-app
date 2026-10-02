@@ -9,10 +9,18 @@ import (
 	"golden-gate-setup/internal/domain"
 	"golden-gate-setup/internal/plan"
 	"golden-gate-setup/internal/testutil"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
+// The tests describe the macOS wizard on every system; Windows tests switch
+// with onWindows.
+func TestMain(m *testing.M) {
+	goos = "darwin"
+	os.Exit(m.Run())
+}
 func services(t *testing.T) Services {
 	h := testutil.FreshHost(t.TempDir())
 	return Services{Inspect: func(context.Context, domain.Options) (domain.Host, error) { return h, nil }, Build: plan.Build}
@@ -203,7 +211,7 @@ func TestInvalidWorkspaceReturnsToChoices(t *testing.T) {
 func TestEditAsksAboutReplacementsAgain(t *testing.T) {
 	s := services(t)
 	h, _ := s.Inspect(context.Background(), domain.Options{})
-	path := h.Home + "/.config/fish/config.fish"
+	path := filepath.Join(h.Home, ".config/fish/config.fish")
 	h.Files[path] = domain.FileState{Path: path, Exists: true, Mode: 0644, Contents: []byte("# changed after approval\n"), SHA256: "changed"}
 	s.Inspect = func(context.Context, domain.Options) (domain.Host, error) { return h, nil }
 	m := newModel(context.Background(), s)

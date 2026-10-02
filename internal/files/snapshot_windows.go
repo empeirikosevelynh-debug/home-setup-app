@@ -23,7 +23,8 @@ var errRedirect = errors.New("path passes through a link, junction or non-direct
 func IsRedirect(err error) bool { return errors.Is(err, errRedirect) }
 
 // IsPrivate is always true on Windows: mode bits do not describe access
-// there, and files in the user profile inherit its owner-only access lists.
+// there. Files in the user profile inherit its access list, which admits
+// only the user, administrators and the system.
 func IsPrivate(fs.FileMode) bool { return true }
 
 func redirected(mode fs.FileMode) bool { return mode&(fs.ModeSymlink|fs.ModeIrregular) != 0 }
