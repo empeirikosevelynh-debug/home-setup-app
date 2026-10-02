@@ -83,7 +83,7 @@ func TestPlainImport(t *testing.T) {
 		return h, e
 	}
 	var out bytes.Buffer
-	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\nnone\n"+old+"\n.ssh,Documents\nnone\nno\n"), &out)
+	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\n"+old+"\n.ssh,Documents\nnone\nnone\nno\n"), &out)
 	if err != nil {
 		t.Fatal(err, out.String())
 	}
@@ -202,5 +202,76 @@ func TestChezmoiCandidatesAsked(t *testing.T) {
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if m.stage != "preview" || !reflect.DeepEqual(m.options.ChezmoiAdd, []string{tool}) || !strings.Contains(m.lines, "with 1 imported dotfiles") {
 		t.Fatal("choice not planned", m.stage, m.options.ChezmoiAdd)
+	}
+}
+
+func TestDotfilesSuggestions(t *testing.T) {
+	old := t.TempDir()
+	source := filepath.Join(old, ".local/share/chezmoi")
+	os.MkdirAll(filepath.Join(source, ".git"), 0700)
+	os.MkdirAll(filepath.Join(source, "dot_config/homebrew"), 0700)
+	os.WriteFile(filepath.Join(source, "dot_Brewfile"), []byte("brew \"jq\"\n"), 0600)
+	os.WriteFile(filepath.Join(source, "dot_config/homebrew/work.Brewfile"), []byte("cask \"zed\"\n"), 0600)
+	os.WriteFile(filepath.Join(source, "dot_Brewfile.tmpl"), []byte("{{ .x }}"), 0600)
+	os.WriteFile(filepath.Join(old, ".Brewfile"), []byte("brew \"fd\"\n"), 0600)
+	if got := previousRepo(old); got != source {
+		t.Fatal("a source without a remote is suggested itself:", got)
+	}
+	os.WriteFile(filepath.Join(source, ".git/config"), []byte("[core]\n\turl = wrong\n[remote \"origin\"]\n\turl = git@github.com:you/dotfiles.git\n"), 0600)
+	if got := previousRepo(old); got != "git@github.com:you/dotfiles.git" {
+		t.Fatal(got)
+	}
+	want := []string{filepath.Join(source, "dot_Brewfile"), filepath.Join(source, "dot_config/homebrew/work.Brewfile"), filepath.Join(old, ".Brewfile")}
+	if got := brewfileSuggestions(old, "/nonexistent/home"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("%q", got)
+	}
+	if plan.ValidDotfilesRepo("/Volumes/Old Drive/Users/you/.local/share/chezmoi") != nil || plan.ValidDotfilesRepo("you dots") == nil {
+		t.Fatal("spaces are allowed only in a folder path")
+	}
+}
+
+func TestRepositoryBrewfileOfferedAfterClone(t *testing.T) {
+	h := testutil.FreshHost(t.TempDir())
+	source := filepath.Join(h.Home, ".local/share/chezmoi")
+	os.MkdirAll(source, 0700)
+	os.WriteFile(filepath.Join(source, "dot_Brewfile"), []byte("brew \"jq\"\ncask \"zed\"\n"), 0600)
+	s := Services{Inspect: func(context.Context, domain.Options) (domain.Host, error) { return h, nil }, Build: plan.Build}
+	m := newModel(context.Background(), s)
+	m.width, m.height = 80, 24
+	m.host = h
+	m.options.DotfilesRepo = "you"
+	m.preview = domain.Plan{Later: "The rest of setup is planned next."}
+	m.Update(applyDone{report: domain.Report{Status: "complete"}})
+	m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if m.stage != "brewfile" || m.options.PreviousBrewfile != filepath.Join(source, "dot_Brewfile") || !strings.Contains(m.View().Content, "Your dotfiles include a Brewfile") {
+		t.Fatal("repository Brewfile not offered", m.stage, m.options.PreviousBrewfile)
+	}
+	m.form.State = huh.StateCompleted
+	if _, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter}); m.stage != "inspecting" || cmd == nil {
+		t.Fatal("review did not continue", m.stage)
+	}
+	// Plain mode asks too.
+	defer func(old func() (string, error)) { homeDir = old }(homeDir)
+	homeDir = func() (string, error) { return h.Home, nil }
+	inspections := 0
+	s.Inspect = func(_ context.Context, o domain.Options) (domain.Host, error) { inspections++; return h, nil }
+	var built domain.Options
+	s.Build = func(_ domain.Host, o domain.Options) (domain.Plan, error) {
+		built = o
+		p := domain.Plan{ID: "plan", Supported: true}
+		if inspections == 1 {
+			p.Later = "The rest of setup is planned next."
+		}
+		return p, nil
+	}
+	s.Apply = func(context.Context, domain.Plan, func(domain.Event)) (domain.Report, error) {
+		return domain.Report{Status: "complete"}, nil
+	}
+	var out bytes.Buffer
+	if _, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\nnone\nyou\nnone\nyes\n\n\nformula:jq\nyes\n"), &out); err != nil {
+		t.Fatal(err, out.String())
+	}
+	if built.PreviousBrewfile != filepath.Join(source, "dot_Brewfile") || !reflect.DeepEqual(built.PreviousPackages, []string{"formula:jq"}) || !strings.Contains(out.String(), "Your dotfiles include a Brewfile") {
+		t.Fatal(built.PreviousBrewfile, built.PreviousPackages, out.String())
 	}
 }

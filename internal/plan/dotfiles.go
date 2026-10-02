@@ -20,7 +20,10 @@ func DotfilesSource(h domain.Host) string {
 // ValidDotfilesRepo checks a repository the way chezmoi init takes it: a
 // GitHub user, user/repo or a Git URL, never an option.
 func ValidDotfilesRepo(repo string) error {
-	if repo == "" || len(repo) > 512 || strings.HasPrefix(repo, "-") || strings.ContainsFunc(repo, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+	// A local folder, such as a previous Mac's chezmoi source, may have
+	// spaces in its path.
+	space := !filepath.IsAbs(repo)
+	if repo == "" || len(repo) > 512 || strings.HasPrefix(repo, "-") || strings.ContainsFunc(repo, func(r rune) bool { return space && unicode.IsSpace(r) || unicode.IsControl(r) }) {
 		return fmt.Errorf("enter your dotfiles repository as a GitHub user, user/repo or a Git URL")
 	}
 	return nil

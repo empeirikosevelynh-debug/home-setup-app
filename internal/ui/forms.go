@@ -76,7 +76,12 @@ func selectionForm(o *domain.Options, dark func() bool) (*huh.Form, []*huh.Multi
 		fields = append(fields, huh.NewConfirm().Title("Create a new project if absent or empty?").Value(&w.Create))
 		groups = append(groups, huh.NewGroup(fields...).WithHideFunc(func() bool { return !plan.Has(o.Languages, w.Language) }))
 	}
-	dotfiles := huh.NewInput().Title("Dotfiles repository (optional)").Description("Your chezmoi dotfiles: a GitHub user, user/repo or a Git URL. Setup clones it, then restores its plain files after you review them; templates, encrypted files and scripts are left for chezmoi apply. Leave empty to skip.").Value(&o.DotfilesRepo).Validate(func(s string) error {
+	dotfiles := huh.NewInput().Title("Dotfiles repository (optional)").Description("Your chezmoi dotfiles: a GitHub user, user/repo, a Git URL, or your previous Mac's chezmoi source. Setup clones it, you review each file it would change, then chezmoi applies the ones you approve. Its scripts are not run. Leave empty to skip.").SuggestionsFunc(func() []string {
+		if repo := previousRepo(o.ImportFrom); repo != "" {
+			return []string{repo}
+		}
+		return nil
+	}, &o.ImportFrom).Value(&o.DotfilesRepo).Validate(func(s string) error {
 		if s == "" {
 			return nil
 		}
@@ -84,7 +89,7 @@ func selectionForm(o *domain.Options, dark func() bool) (*huh.Form, []*huh.Multi
 	})
 	imports, folderList := importForm(o)
 	previous, previousList := previousForm(o)
-	groups = append(append(append(groups, huh.NewGroup(dotfiles)), imports...), previous...)
+	groups = append(append(append(groups, imports...), huh.NewGroup(dotfiles)), previous...)
 	return huh.NewForm(groups...).WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return formTheme(dark()) })), []*huh.MultiSelect[string]{apps, plugins, langs, folderList, previousList}
 }
 
@@ -127,7 +132,7 @@ func previousForm(o *domain.Options) ([]*huh.Group, *huh.MultiSelect[string]) {
 		}
 		return options
 	}, &o.PreviousBrewfile).Value(&o.PreviousPackages).Filterable(true)
-	path := huh.NewInput().Title("Previous app list (optional)").Description("A Homebrew-full.Brewfile from a Golden Gate Recovery folder, to reinstall what your previous Mac had. Leave empty to skip.").SuggestionsFunc(func() []string { return recoveryInventories(o.ImportFrom, home) }, &o.ImportFrom).Value(&o.PreviousBrewfile).Validate(func(s string) error {
+	path := huh.NewInput().Title("Previous app list (optional)").Description("A Homebrew-full.Brewfile from a Golden Gate Recovery folder, or a Brewfile from your dotfiles, to reinstall what your previous Mac had. Leave empty to skip.").SuggestionsFunc(func() []string { return brewfileSuggestions(o.ImportFrom, home) }, &o.ImportFrom).Value(&o.PreviousBrewfile).Validate(func(s string) error {
 		if s == "" {
 			return nil
 		}

@@ -188,15 +188,15 @@ func RunPlain(ctx context.Context, s Services, in io.Reader, out io.Writer) (dom
 		o.Workspaces = append(o.Workspaces, domain.Workspace{Language: l, Path: path, Module: name, EntryPoint: entry, Create: create})
 	}
 	if goos != "windows" {
-		if o.DotfilesRepo, e = p.ask("Dotfiles repository for chezmoi (a GitHub user, user/repo or a Git URL; none skips)", or(o.DotfilesRepo, "none")); e != nil {
+		if e = askImport(p, &o); e != nil {
+			return domain.Report{}, e
+		}
+		if o.DotfilesRepo, e = p.ask("Dotfiles repository for chezmoi (a GitHub user, user/repo, a Git URL or a folder; none skips)", or(o.DotfilesRepo, or(previousRepo(o.ImportFrom), "none"))); e != nil {
 			return domain.Report{}, e
 		}
 		if o.DotfilesRepo == "none" {
 			o.DotfilesRepo = ""
 		} else if e = plan.ValidDotfilesRepo(o.DotfilesRepo); e != nil {
-			return domain.Report{}, e
-		}
-		if e = askImport(p, &o); e != nil {
 			return domain.Report{}, e
 		}
 		if e = askPrevious(p, &o); e != nil {
@@ -211,6 +211,14 @@ func RunPlain(ctx context.Context, s Services, in io.Reader, out io.Writer) (dom
 		fmt.Fprintln(out, "Next: "+reviewed.Later)
 		if again, e := p.yes("Review the rest of setup now?", true); e != nil || !again {
 			return r, e
+		}
+		home, _ := homeDir()
+		if found := repoBrewfiles(chezmoiSource(home)); o.DotfilesRepo != "" && o.PreviousBrewfile == "" && len(found) > 0 {
+			fmt.Fprintln(out, "Your dotfiles include a Brewfile: "+found[0])
+			o.PreviousBrewfile = found[0]
+			if e = askPrevious(p, &o); e != nil {
+				return r, e
+			}
 		}
 		o.FileChoices = map[string]domain.FileDecision{}
 	}
@@ -346,10 +354,13 @@ func askImport(p prompts, o *domain.Options) error {
 func askPrevious(p prompts, o *domain.Options) error {
 	suggestion := "none"
 	home, _ := homeDir()
-	if found := recoveryInventories(o.ImportFrom, home); len(found) > 0 {
+	if found := brewfileSuggestions(o.ImportFrom, home); len(found) > 0 {
 		suggestion = found[0]
 	}
-	path, e := p.ask("Previous app list: a Homebrew-full.Brewfile (none skips)", suggestion)
+	if o.PreviousBrewfile != "" {
+		suggestion = o.PreviousBrewfile
+	}
+	path, e := p.ask("Previous app list: a Homebrew-full.Brewfile or a Brewfile (none skips)", suggestion)
 	if e != nil || path == "none" {
 		o.PreviousBrewfile, o.PreviousPackages = "", nil
 		return e

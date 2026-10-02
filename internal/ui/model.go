@@ -282,6 +282,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			case v.String() == "r" && m.continues():
 				m.report = domain.Report{}
+				if found := repoBrewfiles(plan.DotfilesSource(m.host)); m.options.DotfilesRepo != "" && m.options.PreviousBrewfile == "" && len(found) > 0 {
+					m.offerBrewfile(found[0])
+					return m, m.form.Init()
+				}
 				m.stage = "inspecting"
 				return m, m.inspectCmd()
 			}
@@ -324,7 +328,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	if m.form != nil && (m.stage == "welcome" || m.stage == "select" || m.stage == "files" || m.stage == "chezmoi") {
+	if m.form != nil && (m.stage == "welcome" || m.stage == "select" || m.stage == "files" || m.stage == "chezmoi" || m.stage == "brewfile") {
 		next, cmd := m.form.Update(msg)
 		if f, ok := next.(*huh.Form); ok {
 			m.form = f
@@ -342,6 +346,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.stage = "inspecting"
 				m.form = nil
 				m.notice = ""
+				return m, m.inspectCmd()
+			case "brewfile":
+				m.options = settled(m.options)
+				m.form = nil
+				m.stage = "inspecting"
 				return m, m.inspectCmd()
 			case "chezmoi":
 				m.options.ChezmoiAdd = append([]string(nil), m.chezmoiChoice...)
@@ -371,6 +380,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 func (m *model) readEvent() tea.Cmd { return func() tea.Msg { return <-m.events } }
+
+// offerBrewfile asks, once the dotfiles repository is cloned, whether to
+// reinstall from the Brewfile it keeps.
+func (m *model) offerBrewfile(path string) {
+	m.stage = "brewfile"
+	m.options.PreviousBrewfile, m.options.PreviousPackages = path, nil
+	groups, list := previousForm(&m.options)
+	entries, _ := previousEntries(path)
+	note := huh.NewNote().Title("Your dotfiles include a Brewfile").Description(fmt.Sprintf("%s lists %d apps and tools. Choose which to reinstall, or clear the path to skip.", path, len(entries)))
+	m.form = huh.NewForm(append([]*huh.Group{huh.NewGroup(note)}, groups...)...).WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return formTheme(m.dark) }))
+	m.lists = []*huh.MultiSelect[string]{list}
+	m.resizeForm()
+}
 
 // reviewFiles plans with the current choices, then asks about each file a
 // step would replace before showing the plan.
