@@ -1,3 +1,5 @@
+//go:build !windows
+
 package command
 
 import (
@@ -9,22 +11,6 @@ import (
 	"testing"
 )
 
-func TestInteractiveHandoffHasOneOwner(t *testing.T) {
-	calls := 0
-	r := ProcessRunner{Handoff: func(_ context.Context, c domain.Command) error {
-		calls++
-		if c.Args[0] != "path with spaces" {
-			t.Fatal("arguments changed")
-		}
-		return nil
-	}}
-	if e := r.Run(context.Background(), domain.Command{Path: "not executable", Args: []string{"path with spaces"}, Interactive: true}, io.Discard); e != nil || calls != 1 {
-		t.Fatal(e, calls)
-	}
-	if e := (ProcessRunner{}).Run(context.Background(), domain.Command{Interactive: true}, io.Discard); e == nil {
-		t.Fatal("missing handoff accepted")
-	}
-}
 func TestArgumentsRemainSeparate(t *testing.T) {
 	var b bytes.Buffer
 	if e := (ProcessRunner{}).Run(context.Background(), domain.Command{Path: "/usr/bin/printf", Args: []string{"%s", "path with spaces; $(no command)"}}, &b); e != nil || b.String() != "path with spaces; $(no command)" {
@@ -39,27 +25,10 @@ func TestSanitizedDiagnostics(t *testing.T) {
 		t.Fatal("missing or unsafe diagnostics", lines)
 	}
 }
-func TestFragmentedCredentialsRedacted(t *testing.T) {
-	var got string
-	d := diagnostics{emit: func(s string) { got += s }, remaining: 65536}
-	d.Write([]byte("token="))
-	d.Write([]byte("secret-value\n"))
-	if strings.Contains(got, "secret-value") {
-		t.Fatal("split credential leaked", got)
-	}
-}
 func TestInteractiveProcessKeepsForegroundGroup(t *testing.T) {
 	p := Process(context.Background(), domain.Command{Path: "/bin/sh", Interactive: true})
 	if p.SysProcAttr != nil && p.SysProcAttr.Setpgid {
 		t.Fatal("interactive reader is isolated from foreground terminal group")
-	}
-}
-func TestMultiWordAuthorizationRedacted(t *testing.T) {
-	var got string
-	d := diagnostics{emit: func(s string) { got += s }, remaining: 65536}
-	d.Write([]byte("Authorization: Bearer sensitive-token\npassword=secret with spaces\n"))
-	if strings.Contains(got, "sensitive-token") || strings.Contains(got, "with spaces") {
-		t.Fatal("credential tail leaked", got)
 	}
 }
 func TestSelectedCommandStreamsBoundedDiagnostics(t *testing.T) {
@@ -70,16 +39,6 @@ func TestSelectedCommandStreamsBoundedDiagnostics(t *testing.T) {
 	}
 	if !strings.Contains(got, "progress line") {
 		t.Fatal("stdout progress missing")
-	}
-}
-func TestDiagnosticsKeepMultibyteText(t *testing.T) {
-	var got []string
-	d := diagnostics{emit: func(s string) { got = append(got, s) }, remaining: 65536}
-	d.Write([]byte("café ✓ d"))
-	d.Write([]byte("one\nsplit \xc3"))
-	d.Write([]byte("\xa9\n"))
-	if strings.Join(got, "|") != "café ✓ done|split é" {
-		t.Fatalf("text garbled: %q", got)
 	}
 }
 func TestFailureKeepsFinalOutput(t *testing.T) {

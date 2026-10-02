@@ -9,10 +9,18 @@ import (
 	"golden-gate-setup/internal/domain"
 	"golden-gate-setup/internal/plan"
 	"golden-gate-setup/internal/testutil"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
+// The tests describe the macOS wizard on every system; Windows tests switch
+// with onWindows.
+func TestMain(m *testing.M) {
+	goos = "darwin"
+	os.Exit(m.Run())
+}
 func services(t *testing.T) Services {
 	h := testutil.FreshHost(t.TempDir())
 	return Services{Inspect: func(context.Context, domain.Options) (domain.Host, error) { return h, nil }, Build: plan.Build}
@@ -203,7 +211,7 @@ func TestInvalidWorkspaceReturnsToChoices(t *testing.T) {
 func TestEditAsksAboutReplacementsAgain(t *testing.T) {
 	s := services(t)
 	h, _ := s.Inspect(context.Background(), domain.Options{})
-	path := h.Home + "/.config/fish/config.fish"
+	path := filepath.Join(h.Home, ".config/fish/config.fish")
 	h.Files[path] = domain.FileState{Path: path, Exists: true, Mode: 0644, Contents: []byte("# changed after approval\n"), SHA256: "changed"}
 	s.Inspect = func(context.Context, domain.Options) (domain.Host, error) { return h, nil }
 	m := newModel(context.Background(), s)
@@ -241,5 +249,42 @@ func TestApplyingViewFollowsOutput(t *testing.T) {
 	m.Update(domain.Event{Status: "detail", Text: "row 61"})
 	if !strings.Contains(m.View().Content, "row 61") {
 		t.Fatal("view did not follow again at the end")
+	}
+}
+func onWindows(t *testing.T) {
+	old := goos
+	goos = "windows"
+	t.Cleanup(func() { goos = old })
+}
+func TestWindowsSelectionOffersWindowsChoices(t *testing.T) {
+	onWindows(t)
+	m := newModel(context.Background(), services(t))
+	m.width, m.height = 80, 24
+	if strings.Join(m.options.Apps, ",") != "warp,zed" || len(m.options.Plugins) != 0 || m.options.CaptureInventory || m.options.PrepareRecovery {
+		t.Fatalf("not the Windows defaults: %+v", m.options)
+	}
+	m.edit()
+	if len(m.lists) != 2 || m.draft.Workspaces != nil {
+		t.Fatal("Fish plugins or workspaces offered on Windows")
+	}
+	run(m, m.form.Init())
+	if view := m.View().Content; !strings.Contains(view, "Chocolatey") || strings.Contains(view, "applite") {
+		t.Fatal("macOS application choices shown on Windows:\n" + view)
+	}
+}
+
+// run feeds a command's messages back into the model, as the program would.
+func run(m *model, cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		for _, c := range msg {
+			run(m, c)
+		}
+	case nil:
+	default:
+		m.Update(msg)
 	}
 }

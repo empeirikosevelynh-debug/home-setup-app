@@ -20,6 +20,9 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 	}
 	hostSum := sha256.Sum256(hostJSON)
 	p := domain.Plan{InspectionID: hex.EncodeToString(hostSum[:]), SchemaVersion: 1, Supported: true, Options: o, Steps: []domain.Step{}, ManualTasks: []domain.ManualTask{}, Problems: []string{}}
+	if h.OS == "windows" {
+		return buildWindows(h, o, p)
+	}
 	for _, choice := range []struct {
 		values, allowed []string
 		name            string
@@ -111,37 +114,14 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 			}
 		}
 	}
-	config := []struct{ asset, path string }{{"fish/config.fish", filepath.Join(h.Home, ".config/fish/config.fish")}, {"starship.toml", filepath.Join(h.Home, ".config/starship.toml")}, {"zed/settings.example.json", filepath.Join(h.Home, ".config/zed/settings.json")}, {"lazygit/config.yml", filepath.Join(h.LazyGitDir, "config.yml")}}
+	config := []configFile{{"fish/config.fish", filepath.Join(h.Home, ".config/fish/config.fish")}, {"starship.toml", filepath.Join(h.Home, ".config/starship.toml")}, {"zed/settings.example.json", filepath.Join(h.Home, ".config/zed/settings.json")}, {"lazygit/config.yml", filepath.Join(h.LazyGitDir, "config.yml")}}
 	if o.PrepareRecovery && Has(o.Apps, "kopiaui") {
-		config = append(config, struct{ asset, path string }{"recovery/kopiaignore", filepath.Join(h.Home, ".kopiaignore")})
+		config = append(config, configFile{"recovery/kopiaignore", filepath.Join(h.Home, ".kopiaignore")})
 	}
 	for _, c := range config {
-		data, err := templates.Load(c.asset)
-		if err != nil {
+		if err := addConfig(&p, h, o, c, add); err != nil {
 			return p, err
 		}
-		before := h.Files[c.path]
-		decision := domain.Create
-		if before.Exists {
-			if !before.Symlink && bytes.Equal(before.Contents, data) {
-				continue
-			}
-			decision = domain.Preserve
-			if value, ok := o.FileChoices[c.path]; ok {
-				decision = value
-			}
-			if before.Symlink || !before.Mode.IsRegular() && before.Mode != 0 || decision != domain.Replace {
-				p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "file:" + c.path, Title: "Preserve existing " + filepath.Base(c.path), Instructions: "Review and merge the supplied configuration with " + c.path + ". Comments and unrelated settings remain unchanged.", Required: false})
-				continue
-			}
-		}
-		if !within(h.Home, c.path) {
-			p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "file:" + c.path, Title: "Review custom configuration location", Instructions: c.path + " is outside the home directory and is preserved.", Required: false})
-			continue
-		}
-		hash := sha256.Sum256(data)
-		change := domain.FileChange{Path: c.path, BeforeSHA256: before.SHA256, BeforeExists: before.Exists, Mode: 0644, Desired: data, Decision: decision}
-		add(domain.Step{ID: "file:" + c.path, Label: "Configure " + filepath.Base(c.path), Kind: "file", File: &change, Check: domain.Check{Kind: "file", Target: c.path, Expected: hex.EncodeToString(hash[:])}})
 	}
 	workspacePaths := map[string]bool{}
 	for _, w := range o.Workspaces {
@@ -170,7 +150,7 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 		}
 	}
 	if o.ConfigureGit {
-		add(domain.Step{ID: "git", Label: "Set Git’s Zed editor and delta viewer", Kind: "git", BeforeFiles: []domain.FileState{fileState(h, filepath.Join(h.Home, ".gitconfig")), fileState(h, filepath.Join(h.Home, ".config/git/config"))}, Check: domain.Check{Kind: "git"}})
+		add(gitStep(h))
 	}
 	if len(o.Plugins) > 0 {
 		if PluginsSatisfied(h, o.Plugins) {
@@ -181,23 +161,10 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 		}
 	}
 	if len(o.Languages) > 0 {
-		label := "Install selected language servers"
-		if Has(o.Languages, "go") {
-			label += " (gopls 0.23.0)"
-		}
-		if Has(o.Languages, "nim") {
-			label += " (nimlangserver 1.14.0; Nimble may request Nim 2.0.8)"
-		}
-		add(domain.Step{ID: "language-tools", Label: label, Kind: "language-tools", Check: domain.Check{Kind: "language-tools"}})
+		add(languageStep(o))
 	}
 	if o.AdoptChezmoi {
-		if h.ChezmoiDir != "" && !within(h.Home, h.ChezmoiDir) {
-			p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "chezmoi-location", Title: "Adopt files in your custom chezmoi source", Instructions: "The source outside your home is preserved; review and add selected files manually.", Required: true})
-		} else if h.ChezmoiDirty {
-			p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "chezmoi-conflict", Title: "Preserve pending chezmoi source edits", Instructions: "Reconcile source edits before adopting the new live settings.", Required: false})
-		} else {
-			add(domain.Step{ID: "chezmoi", Label: "Adopt selected configuration into chezmoi", Kind: "chezmoi", Check: domain.Check{Kind: "chezmoi"}})
-		}
+		addChezmoi(&p, h, add)
 	}
 	if o.CaptureInventory || o.PrepareRecovery {
 		add(domain.Step{ID: "recovery", Label: "Prepare dated recovery records", Kind: "recovery", Check: domain.Check{Kind: "recovery"}})
@@ -208,6 +175,62 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 		return p, err
 	}
 	return p, nil
+}
+
+type configFile struct{ asset, path string }
+
+// addConfig plans one supplied configuration file: create it, replace it
+// after an approved review, or preserve it with a manual task.
+func addConfig(p *domain.Plan, h domain.Host, o domain.Options, c configFile, add func(domain.Step)) error {
+	data, err := templates.Load(c.asset)
+	if err != nil {
+		return err
+	}
+	before := h.Files[c.path]
+	decision := domain.Create
+	if before.Exists {
+		if !before.Symlink && bytes.Equal(before.Contents, data) {
+			return nil
+		}
+		decision = domain.Preserve
+		if value, ok := o.FileChoices[c.path]; ok {
+			decision = value
+		}
+		if before.Symlink || !before.Mode.IsRegular() && before.Mode != 0 || decision != domain.Replace {
+			p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "file:" + c.path, Title: "Preserve existing " + filepath.Base(c.path), Instructions: "Review and merge the supplied configuration with " + c.path + ". Comments and unrelated settings remain unchanged.", Required: false})
+			return nil
+		}
+	}
+	if !within(h.Home, c.path) {
+		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "file:" + c.path, Title: "Review custom configuration location", Instructions: c.path + " is outside the home directory and is preserved.", Required: false})
+		return nil
+	}
+	hash := sha256.Sum256(data)
+	change := domain.FileChange{Path: c.path, BeforeSHA256: before.SHA256, BeforeExists: before.Exists, Mode: 0644, Desired: data, Decision: decision}
+	add(domain.Step{ID: "file:" + c.path, Label: "Configure " + filepath.Base(c.path), Kind: "file", File: &change, Check: domain.Check{Kind: "file", Target: c.path, Expected: hex.EncodeToString(hash[:])}})
+	return nil
+}
+func gitStep(h domain.Host) domain.Step {
+	return domain.Step{ID: "git", Label: "Set Git’s Zed editor and delta viewer", Kind: "git", BeforeFiles: []domain.FileState{fileState(h, filepath.Join(h.Home, ".gitconfig")), fileState(h, filepath.Join(h.Home, ".config/git/config"))}, Check: domain.Check{Kind: "git"}}
+}
+func languageStep(o domain.Options) domain.Step {
+	label := "Install selected language servers"
+	if Has(o.Languages, "go") {
+		label += " (gopls 0.23.0)"
+	}
+	if Has(o.Languages, "nim") {
+		label += " (nimlangserver 1.14.0; Nimble may request Nim 2.0.8)"
+	}
+	return domain.Step{ID: "language-tools", Label: label, Kind: "language-tools", Check: domain.Check{Kind: "language-tools"}}
+}
+func addChezmoi(p *domain.Plan, h domain.Host, add func(domain.Step)) {
+	if h.ChezmoiDir != "" && !within(h.Home, h.ChezmoiDir) {
+		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "chezmoi-location", Title: "Adopt files in your custom chezmoi source", Instructions: "The source outside your home is preserved; review and add selected files manually.", Required: true})
+	} else if h.ChezmoiDirty {
+		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "chezmoi-conflict", Title: "Preserve pending chezmoi source edits", Instructions: "Reconcile source edits before adopting the new live settings.", Required: false})
+	} else {
+		add(domain.Step{ID: "chezmoi", Label: "Adopt selected configuration into chezmoi", Kind: "chezmoi", Check: domain.Check{Kind: "chezmoi"}})
+	}
 }
 func within(root, path string) bool {
 	rel, err := filepath.Rel(root, path)

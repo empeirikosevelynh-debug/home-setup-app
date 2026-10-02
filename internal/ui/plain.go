@@ -97,9 +97,13 @@ func RunPlain(ctx context.Context, s Services, in io.Reader, out io.Writer) (dom
 		return domain.Report{}, errors.New("inspection/planning service unavailable")
 	}
 	p := prompts{ctx, bufio.NewReader(in), out}
-	o := plan.DefaultOptions()
-	fmt.Fprintln(out, "Golden Gate Setup\nMigration first: restore files and settings with Migration Assistant before setup when reinstalling macOS. Existing files are preserved by default.")
-	if _, e := p.yes("Have you restored an existing backup? (no is fine for a fresh Mac)", false); e != nil {
+	o := plan.DefaultOptionsFor(goos)
+	intro, question := "Migration first: restore files and settings with Migration Assistant before setup when reinstalling macOS.", "Have you restored an existing backup? (no is fine for a fresh Mac)"
+	if goos == "windows" {
+		intro, question = "Restore first: when moving to a new PC, restore your files from your backup before setup.", "Have you restored an existing backup? (no is fine for a fresh PC)"
+	}
+	fmt.Fprintln(out, "Golden Gate Setup\n"+intro+" Existing files are preserved by default.")
+	if _, e := p.yes(question, false); e != nil {
 		return domain.Report{}, e
 	}
 	if s.LoadLatest != nil {
@@ -118,29 +122,40 @@ func RunPlain(ctx context.Context, s Services, in io.Reader, out io.Writer) (dom
 		}
 	}
 	var e error
-	o.Apps, e = p.list("Applications", o.Apps, plan.Apps)
+	offered := plan.Choices(goos)
+	o.Apps, e = p.list("Applications", o.Apps, offered.Apps)
 	if e != nil {
 		return domain.Report{}, e
 	}
-	o.Plugins, e = p.list("Fish plugins", o.Plugins, append(append([]string{}, plan.StartingPlugins...), plan.ExtraPlugins...))
+	if len(offered.Plugins) > 0 {
+		o.Plugins, e = p.list("Fish plugins", o.Plugins, offered.Plugins)
+		if e != nil {
+			return domain.Report{}, e
+		}
+	}
+	o.Languages, e = p.list("Languages", o.Languages, offered.Languages)
 	if e != nil {
 		return domain.Report{}, e
 	}
-	o.Languages, e = p.list("Languages", o.Languages, plan.Languages)
-	if e != nil {
-		return domain.Report{}, e
-	}
-	for _, v := range []struct {
+	questions := []struct {
 		label string
 		value *bool
-	}{{"Configure Git display and editor?", &o.ConfigureGit}, {"Adopt reviewed files in chezmoi?", &o.AdoptChezmoi}, {"Capture complete Homebrew inventory?", &o.CaptureInventory}, {"Prepare recovery notes?", &o.PrepareRecovery}} {
+	}{{"Configure Git display and editor?", &o.ConfigureGit}, {"Adopt reviewed files in chezmoi?", &o.AdoptChezmoi}, {"Capture complete Homebrew inventory?", &o.CaptureInventory}, {"Prepare recovery notes?", &o.PrepareRecovery}}
+	if goos == "windows" {
+		questions = questions[:2]
+	}
+	for _, v := range questions {
 		*v.value, e = p.yes(v.label, *v.value)
 		if e != nil {
 			return domain.Report{}, e
 		}
 	}
 	o.Workspaces = nil
-	for _, l := range o.Languages {
+	workspaceLanguages := o.Languages
+	if goos == "windows" {
+		workspaceLanguages = nil
+	}
+	for _, l := range workspaceLanguages {
 		path, e := p.ask(l+" workspace absolute path (none skips)", "none")
 		if e != nil {
 			return domain.Report{}, e

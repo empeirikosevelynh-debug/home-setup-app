@@ -134,10 +134,10 @@ func (e *Executor) Execute(ctx context.Context, p domain.Plan, emit func(domain.
 					return fail(step, result, errors.New("package step has no package"))
 				}
 				q := step.Package
-				if q.Kind == "cask" {
+				if app := plan.AppFor(*q); app != "" {
 					vendor := false
 					for _, a := range host.Apps {
-						if strings.EqualFold(a.Name, plan.AppNames[q.Token]) {
+						if strings.EqualFold(a.Name, plan.AppNames[app]) {
 							vendor = true
 						}
 					}
@@ -148,7 +148,7 @@ func (e *Executor) Execute(ctx context.Context, p domain.Plan, emit func(domain.
 						break
 					}
 				}
-				er = e.Runner.Run(ctx, domain.Command{Path: host.BrewPath, Stream: true, Interactive: q.Kind == "cask", Args: []string{"install", "--" + q.Kind, q.Token}, Env: []string{"HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_INSTALL_CLEANUP=1", "HOMEBREW_NO_INSTALL_UPGRADE=1"}}, io.Discard)
+				er = e.Runner.Run(ctx, installCommand(host, *q), io.Discard)
 			case "file":
 				if step.File == nil {
 					return fail(step, result, errors.New("file step has no reviewed change"))
@@ -200,4 +200,11 @@ func (e *Executor) Execute(ctx context.Context, p domain.Plan, emit func(domain.
 		return report, er
 	}
 	return report, nil
+}
+
+func installCommand(h domain.Host, q domain.Package) domain.Command {
+	if q.Kind == "choco" {
+		return domain.Command{Path: h.ChocoPath, Stream: true, Args: []string{"install", q.Token, "--yes", "--no-progress"}}
+	}
+	return domain.Command{Path: h.BrewPath, Stream: true, Interactive: q.Kind == "cask", Args: []string{"install", "--" + q.Kind, q.Token}, Env: []string{"HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_INSTALL_CLEANUP=1", "HOMEBREW_NO_INSTALL_UPGRADE=1"}}
 }

@@ -4,6 +4,8 @@ A Go application for first-time setup of Warp, Fish, Zed, development tools, and
 
 Choose your tools, review the actual changes, then accept the plan. Existing apps and configuration are preserved by default. Applite, Cork, and command-line package management share Homebrew at `/opt/homebrew`.
 
+A [Windows 11 preview](#windows-preview) installs the same command-line tools, Warp and Zed with Chocolatey.
+
 **0.1.0-rc.1 · MIT licensed.** This complete release candidate includes integration, race, and terminal verification. Clean-Mac installation, actual GUI behavior, VoiceOver, and data retrieval still need [manual acceptance](docs/manual-acceptance.md). Release artifacts are unsigned and not notarized; no external publication has occurred.
 
 ## Start from source
@@ -57,6 +59,24 @@ Cancellation stops new steps and records interrupted work. Start again, restore 
 
 App lists, inventories, and local chezmoi adoption each save different parts of the setup. **None backs up personal data.** Complete and test Time Machine or Kopia separately. After reinstalling macOS, migrate an existing account before rebuilding it. See [recovery](docs/recovery.md).
 
+## Windows (preview)
+
+On Windows 11 (x64 or Arm) the wizard installs the core command-line tools, the chosen apps (Warp, Zed, GitHub Desktop, KopiaUI) and Go or Nim with [Chocolatey](https://chocolatey.org/). It configures Starship, Zed, lazygit, Git and chezmoi with the same review, diffs and backups as on macOS. Fish and its plugins, Crystal, project workspaces and recovery records are macOS-only for now. Warp runs PowerShell; the summary lists the profile lines that start Starship and zoxide.
+
+Prerequisites, in PowerShell opened with **Run as administrator**:
+
+1. Install Chocolatey 2 with its [official instructions](https://chocolatey.org/install).
+2. Install Go and Git: `choco install golang git --yes`, then open a new administrator window.
+3. Build and run from the project directory:
+
+```powershell
+go build -o bin\golden-setup.exe .\cmd\golden-setup
+.\bin\golden-setup.exe --plan   # Read-only; reports anything to fix first
+.\bin\golden-setup.exe          # Wizard; run from an administrator window
+```
+
+Chocolatey installs software for the whole PC, so applying needs an elevated terminal. Try a first run in Windows Sandbox or a virtual machine. This preview has not been tested on real Windows hardware yet; see [troubleshooting](docs/troubleshooting.md#windows-preview) for its limits.
+
 ## Development and release
 
 Go 1.26+ is required; Charm dependencies and embedded assets are pinned. Tests use temporary homes and fake external services. The fixture executable is separate from the shipped application.
@@ -84,6 +104,8 @@ You can also use **git: clone** from the command palette, or run `zed .` in an e
 - **Tasks** (`task: spawn`): tests, race tests, vet, the gofmt check, build, the read-only `--plan` preview, the wizard and plain prompts against the sandbox fixture, terminal smoke tests, and script checks. No task runs the real wizard. Task commands work in fish, zsh and bash; the sandbox tasks need macOS.
 - **Debugging** (Delve, `brew install delve`): the read-only preview, the tests in the current file's package, and any test or `main` from the gutter.
 - **Formatting:** Go files are formatted with gofmt on save. Other files, including the embedded templates, are left as written.
+
+On Windows, Zed runs tasks in PowerShell; use PowerShell 7, since Windows PowerShell 5 does not accept `&&`. The script-check and smoke-test tasks need macOS.
 
 See [verification](docs/verification.md), [contributing](CONTRIBUTING.md), [security](SECURITY.md), and [local release packaging](docs/releasing.md). Packaging creates a native archive, matching source archive, build/module inventory, dependency licenses, and SHA-256 checksums from a clean commit. It never publishes. The module has a local name; choose a real public repository identity before offering `go install` instructions.
 

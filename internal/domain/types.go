@@ -24,6 +24,10 @@ type Host struct {
 	Apps                                                                              []AppBundle
 	Files                                                                             map[string]FileState
 	Tools                                                                             map[string]string
+	// Windows only. Empty values are left out of the JSON, so macOS
+	// inspection data, and the plan IDs derived from it, are unchanged.
+	ChocoPath, ChocoVersion, AppData string `json:",omitempty"`
+	Elevated                         bool   `json:",omitempty"`
 }
 type InstalledPackage struct {
 	Version   string

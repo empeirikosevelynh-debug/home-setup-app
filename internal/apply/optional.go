@@ -77,7 +77,7 @@ func OptionalHandlers(r command.Runner, m files.Manager) map[string]Handler {
 					return false, e
 				}
 				sum := sha256.Sum256(recoveryMetadata(h))
-				if !meta.Exists || meta.Mode.Perm()&0077 != 0 || meta.SHA256 != hex.EncodeToString(sum[:]) {
+				if !meta.Exists || !files.IsPrivate(meta.Mode) || meta.SHA256 != hex.EncodeToString(sum[:]) {
 					return false, nil
 				}
 				return inventorySatisfied(m, h, filepath.Join(dir, "Homebrew-full.Brewfile"))

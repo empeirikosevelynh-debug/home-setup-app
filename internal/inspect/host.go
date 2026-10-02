@@ -23,6 +23,14 @@ type Inspector struct {
 	Platform func(context.Context) (domain.Host, error)
 	Lookup   func(string) (string, error)
 	AppsDirs []string
+	Getenv   func(string) string
+}
+
+func (i Inspector) getenv(name string) string {
+	if i.Getenv != nil {
+		return i.Getenv(name)
+	}
+	return os.Getenv(name)
 }
 
 func (i Inspector) capture(ctx context.Context, path string, args ...string) (string, error) {
@@ -56,13 +64,22 @@ func (i Inspector) lookup(name string) (string, error) {
 	if e == nil || filepath.IsAbs(name) {
 		return p, e
 	}
-	return exec.LookPath(filepath.Join("/opt/homebrew/bin", name))
+	for _, dir := range fallbackDirs() {
+		if p, err := exec.LookPath(filepath.Join(dir, name)); err == nil {
+			return p, nil
+		}
+	}
+	return "", e
 }
 func (i Inspector) platform(ctx context.Context) (domain.Host, error) {
 	if i.Platform != nil {
 		return i.Platform(ctx)
 	}
 	h := domain.Host{OS: runtime.GOOS, Arch: runtime.GOARCH}
+	if h.OS == "windows" {
+		readWindows(&h)
+		return h, nil
+	}
 	if h.OS != "darwin" {
 		return h, nil
 	}
@@ -94,14 +111,23 @@ func (i Inspector) Read(ctx context.Context, o domain.Options) (domain.Host, err
 		return h, fmt.Errorf("home directory must be absolute")
 	}
 	h.Home = filepath.Clean(h.Home)
-	h.ConfigHome = os.Getenv("XDG_CONFIG_HOME")
+	h.ConfigHome = i.getenv("XDG_CONFIG_HOME")
 	h.BrewPath, h.BrewPrefix = "", ""
 	h.Packages = map[string]domain.InstalledPackage{}
 	h.Files = map[string]domain.FileState{}
 	h.Workspaces = map[string]domain.WorkspaceState{}
 	h.Tools = map[string]string{}
 	h.LazyGitDir = filepath.Join(h.Home, "Library/Application Support/lazygit")
-	if p, e := i.lookup("/opt/homebrew/bin/brew"); e == nil {
+	if h.OS == "windows" {
+		h.AppData = i.getenv("APPDATA")
+		if !filepath.IsAbs(h.AppData) {
+			h.AppData = filepath.Join(h.Home, "AppData", "Roaming")
+		}
+		h.LazyGitDir = filepath.Join(h.AppData, "lazygit")
+		if err = i.readChocolatey(ctx, &h, i.getenv("ChocolateyInstall")); err != nil {
+			return h, err
+		}
+	} else if p, e := i.lookup("/opt/homebrew/bin/brew"); e == nil {
 		h.BrewPath = p
 		prefix, e := i.capture(ctx, p, "--prefix")
 		if e != nil {
@@ -132,8 +158,9 @@ func (i Inspector) Read(ctx context.Context, o domain.Options) (domain.Host, err
 		}
 		h.LazyGitDir = filepath.Clean(dir)
 	}
-	h.Apps, err = i.readApps(h)
-	if err != nil {
+	if h.OS == "windows" {
+		h.Apps = windowsApps(uninstallEntries(), h.Packages)
+	} else if h.Apps, err = i.readApps(h); err != nil {
 		return h, err
 	}
 	for _, w := range o.Workspaces {
@@ -180,6 +207,9 @@ func (i Inspector) Read(ctx context.Context, o domain.Options) (domain.Host, err
 		}
 		h.Files[path] = state
 	}
+	if h.OS == "windows" {
+		return i.finish(ctx, h)
+	}
 	for _, sub := range []string{"functions", "conf.d", "completions"} {
 		entries, e := os.ReadDir(filepath.Join(h.Home, ".config/fish", sub))
 		if e != nil && !os.IsNotExist(e) {
@@ -199,8 +229,13 @@ func (i Inspector) Read(ctx context.Context, o domain.Options) (domain.Host, err
 			h.FishLegacy = true
 		}
 	}
+	return i.finish(ctx, h)
+}
+
+// finish reads state shared by both platforms after the platform's own.
+func (i Inspector) finish(ctx context.Context, h domain.Host) (domain.Host, error) {
 	if p := h.Tools["chezmoi"]; p != "" {
-		if err = i.readChezmoi(ctx, &h, p); err != nil {
+		if err := i.readChezmoi(ctx, &h, p); err != nil {
 			return h, err
 		}
 	}

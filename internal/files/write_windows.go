@@ -1,3 +1,5 @@
+//go:build windows
+
 package files
 
 import (
@@ -5,36 +7,44 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
-	"golang.org/x/sys/unix"
+	"golang.org/x/sys/windows"
 	"golden-gate-setup/internal/domain"
 	"os"
 	"path/filepath"
 )
 
-func matches(s domain.FileState, c domain.FileChange) bool {
-	return s.Exists == c.BeforeExists && (!s.Exists || s.SHA256 == c.BeforeSHA256)
-}
-func writeAt(fd int, name string, data []byte, mode uint32) error {
-	n, e := unix.Openat(fd, name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_NOFOLLOW|unix.O_CLOEXEC, mode)
+func writeNew(path string, data []byte, mode os.FileMode) error {
+	f, e := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if e != nil {
 		return e
 	}
-	f := os.NewFile(uintptr(n), name)
 	if _, e = f.Write(data); e == nil {
-		e = f.Chmod(os.FileMode(mode))
-	}
-	if e == nil {
 		e = f.Sync()
 	}
-	ce := f.Close()
-	if e == nil {
+	if ce := f.Close(); e == nil {
 		e = ce
 	}
 	return e
 }
-func (m Manager) Apply(c domain.FileChange, backupDir string) (domain.StepResult, error) {
-	return m.ApplyContext(context.Background(), c, backupDir)
+
+// move renames temp onto path. Without replace it fails when path exists,
+// so creating a file never overwrites one that appeared after the preview.
+func move(temp, path string, replace bool) error {
+	from, e := windows.UTF16PtrFromString(temp)
+	if e != nil {
+		return e
+	}
+	to, e := windows.UTF16PtrFromString(path)
+	if e != nil {
+		return e
+	}
+	flags := uint32(windows.MOVEFILE_WRITE_THROUGH)
+	if replace {
+		flags |= windows.MOVEFILE_REPLACE_EXISTING
+	}
+	return windows.MoveFileEx(from, to, flags)
 }
+
 func (m Manager) ApplyContext(ctx context.Context, c domain.FileChange, backupDir string) (result domain.StepResult, err error) {
 	result.ID = "file:" + c.Path
 	result.Status = "failed"
@@ -53,12 +63,11 @@ func (m Manager) ApplyContext(ctx context.Context, c domain.FileChange, backupDi
 	if e := ctx.Err(); e != nil {
 		return result, e
 	}
-	fd, name, e := m.parent(c.Path, true)
+	dir, e := m.parent(c.Path, true)
 	if e != nil {
 		return result, e
 	}
-	defer unix.Close(fd)
-	before, e := snapshot(fd, name, c.Path)
+	before, e := snapshot(c.Path)
 	if e != nil {
 		return result, e
 	}
@@ -80,33 +89,22 @@ func (m Manager) ApplyContext(ctx context.Context, c domain.FileChange, backupDi
 		mode = before.Mode.Perm()
 	}
 	if before.Exists && !m.SkipBackup {
-		backupName := digest([]byte(c.Path)) + "-" + before.SHA256 + ".bak"
-		backupPath := filepath.Join(backupDir, backupName)
-		bfd, bname, e := m.parent(backupPath, true)
-		if e != nil {
-			return result, e
-		}
-		if e = unix.Fchmod(bfd, 0700); e != nil {
-			unix.Close(bfd)
+		backupPath := filepath.Join(backupDir, digest([]byte(c.Path))+"-"+before.SHA256+".bak")
+		if _, e = m.parent(backupPath, true); e != nil {
 			return result, e
 		}
 		if e = ctx.Err(); e != nil {
-			unix.Close(bfd)
 			return result, e
 		}
-		e = writeAt(bfd, bname, before.Contents, 0600)
-		if e == unix.EEXIST {
-			old, re := snapshot(bfd, bname, backupPath)
-			if re != nil || old.SHA256 != before.SHA256 || old.Mode.Perm()&0077 != 0 {
+		e = writeNew(backupPath, before.Contents, 0600)
+		if os.IsExist(e) {
+			old, re := snapshot(backupPath)
+			if re != nil || old.SHA256 != before.SHA256 {
 				e = fmt.Errorf("existing backup is not a valid private recovery copy")
 			} else {
 				e = nil
 			}
 		}
-		if e == nil {
-			e = unix.Fsync(bfd)
-		}
-		unix.Close(bfd)
 		if e != nil {
 			return result, e
 		}
@@ -116,9 +114,9 @@ func (m Manager) ApplyContext(ctx context.Context, c domain.FileChange, backupDi
 	if _, e = rand.Read(random[:]); e != nil {
 		return result, e
 	}
-	temp := ".golden-setup-" + hex.EncodeToString(random[:])
-	defer unix.Unlinkat(fd, temp, 0)
-	if e = writeAt(fd, temp, c.Desired, uint32(mode)); e != nil {
+	temp := filepath.Join(dir, ".golden-setup-"+hex.EncodeToString(random[:]))
+	defer os.Remove(temp)
+	if e = writeNew(temp, c.Desired, mode); e != nil {
 		return result, e
 	}
 	if m.BeforeRename != nil {
@@ -126,7 +124,10 @@ func (m Manager) ApplyContext(ctx context.Context, c domain.FileChange, backupDi
 			return result, e
 		}
 	}
-	current, e := snapshot(fd, name, c.Path)
+	if _, e = m.parent(c.Path, false); e != nil {
+		return result, e
+	}
+	current, e := snapshot(c.Path)
 	if e != nil {
 		return result, e
 	}
@@ -136,15 +137,7 @@ func (m Manager) ApplyContext(ctx context.Context, c domain.FileChange, backupDi
 	if e = ctx.Err(); e != nil {
 		return result, e
 	}
-	if c.BeforeExists {
-		e = unix.Renameat(fd, temp, fd, name)
-	} else {
-		e = unix.Linkat(fd, temp, fd, name, 0)
-	}
-	if e != nil {
-		return result, e
-	}
-	if e = unix.Fsync(fd); e != nil {
+	if e = move(temp, c.Path, c.BeforeExists); e != nil {
 		return result, e
 	}
 	result.Status = "applied"

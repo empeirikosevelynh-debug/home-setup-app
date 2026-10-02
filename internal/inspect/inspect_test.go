@@ -173,3 +173,50 @@ func TestFisherStateFromUniversalStore(t *testing.T) {
 		t.Fatal("legacy Fisher state missed")
 	}
 }
+func windowsFixture(t *testing.T, version, list string) (inspect.Inspector, *testutil.FakeRunner) {
+	t.Helper()
+	h := testutil.FreshWindowsHost(t.TempDir())
+	choco := inspect.ChocolateyPath("")
+	f := &testutil.FakeRunner{Responses: map[string]testutil.Response{choco + " --version": {Output: version + "\n"}, choco + " list --limit-output": {Output: list}}}
+	i := inspect.Inspector{Home: h.Home, Runner: f, Getenv: func(string) string { return "" }, Platform: func(context.Context) (domain.Host, error) { return h, nil }, Lookup: func(p string) (string, error) {
+		if p == choco {
+			return choco, nil
+		}
+		return "", fs.ErrNotExist
+	}}
+	return i, f
+}
+func TestWindowsInspectionReadsChocolatey(t *testing.T) {
+	i, f := windowsFixture(t, "2.4.1", "chocolatey|2.4.1\nGit|2.56.0\n")
+	h, e := i.Read(context.Background(), plan.DefaultOptionsFor("windows"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if h.ChocoPath != inspect.ChocolateyPath("") || h.ChocoVersion != "2.4.1" || h.Packages["choco:git"].Version != "2.56.0" || h.BrewPath != "" {
+		t.Fatalf("Chocolatey state not read: %+v", h)
+	}
+	if h.LazyGitDir != filepath.Join(h.AppData, "lazygit") || h.AppData == "" {
+		t.Fatal("Windows configuration folders not set", h.AppData, h.LazyGitDir)
+	}
+	for _, c := range f.Calls {
+		if c.Path != h.ChocoPath {
+			t.Fatal("unexpected command", c)
+		}
+	}
+	if _, ok := h.Files[plan.ZedSettingsPath(h)]; !ok {
+		t.Fatal("Windows Zed settings not inspected")
+	}
+}
+func TestOldChocolateyNotListed(t *testing.T) {
+	i, f := windowsFixture(t, "1.4.0", "")
+	h, e := i.Read(context.Background(), plan.DefaultOptionsFor("windows"))
+	if e != nil || h.ChocoVersion != "1.4.0" || len(h.Packages) != 0 || len(f.Calls) != 1 {
+		t.Fatal("Chocolatey 1.x list would search the online repository", e, f.Calls)
+	}
+}
+func TestMalformedChocolateyListRejected(t *testing.T) {
+	i, _ := windowsFixture(t, "2.4.1", "not a package line\n")
+	if _, e := i.Read(context.Background(), plan.DefaultOptionsFor("windows")); e == nil {
+		t.Fatal("malformed Chocolatey output became fresh state")
+	}
+}

@@ -12,7 +12,7 @@ import (
 )
 
 func SelectedFiles(h domain.Host, p domain.Plan) []string {
-	allowed := map[string]bool{filepath.Join(h.Home, ".config/fish/config.fish"): true, filepath.Join(h.Home, ".config/starship.toml"): true, filepath.Join(h.Home, ".config/zed/settings.json"): true, filepath.Join(h.LazyGitDir, "config.yml"): true, filepath.Join(h.Home, ".Brewfile"): true, filepath.Join(h.Home, ".kopiaignore"): true}
+	allowed := map[string]bool{filepath.Join(h.Home, ".config/fish/config.fish"): true, filepath.Join(h.Home, ".config/starship.toml"): true, plan.ZedSettingsPath(h): true, filepath.Join(h.LazyGitDir, "config.yml"): true, filepath.Join(h.Home, ".Brewfile"): true, filepath.Join(h.Home, ".kopiaignore"): true}
 	var result []string
 	for _, s := range p.Steps {
 		if s.File != nil && allowed[s.File.Path] {

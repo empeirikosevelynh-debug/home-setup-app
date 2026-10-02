@@ -67,7 +67,7 @@ func InstallPlugins(ctx context.Context, h domain.Host, selected []string, r com
 		return ErrDeferred
 	}
 	m := files.Manager{Roots: []string{h.Home}}
-	if _, e = m.ApplyContext(ctx, domain.FileChange{Path: path, Desired: data, Mode: 0644, Decision: domain.Create}, filepath.Join(h.Home, "Library/Application Support/Golden Gate Setup/configuration-backups")); e != nil {
+	if _, e = m.ApplyContext(ctx, domain.FileChange{Path: path, Desired: data, Mode: 0644, Decision: domain.Create}, filepath.Join(StateDir(h.OS, h.Home), "configuration-backups")); e != nil {
 		return e
 	}
 	// Fisher records installed plugins in universal variables, which fish only

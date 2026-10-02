@@ -24,7 +24,7 @@ func gitTarget(h domain.Host) string {
 	return primary
 }
 func ConfigureGit(ctx context.Context, h domain.Host, r command.Runner) error {
-	return configureGitAt(ctx, h, r, filepath.Join(h.Home, "Library/Application Support/Golden Gate Setup/configuration-backups"))
+	return configureGitAt(ctx, h, r, filepath.Join(StateDir(h.OS, h.Home), "configuration-backups"))
 }
 func configureGitAt(ctx context.Context, h domain.Host, r command.Runner, backups string) error {
 	tool := h.Tools["git"]
@@ -49,7 +49,7 @@ func configureGitAt(ctx context.Context, h domain.Host, r command.Runner, backup
 			return ErrDeferred
 		}
 	}
-	work := filepath.Join(h.Home, "Library/Application Support/Golden Gate Setup/work")
+	work := filepath.Join(StateDir(h.OS, h.Home), "work")
 	if e := m.EnsurePrivateDir(work); e != nil {
 		return e
 	}

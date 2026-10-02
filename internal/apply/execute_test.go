@@ -1,3 +1,5 @@
+//go:build !windows
+
 package apply
 
 import (
@@ -17,9 +19,6 @@ import (
 	"testing"
 )
 
-type runFn func(context.Context, domain.Command, io.Writer) error
-
-func (f runFn) Run(c context.Context, d domain.Command, w io.Writer) error { return f(c, d, w) }
 func setup(t *testing.T) (*Executor, *domain.Host, domain.Plan, *int) {
 	t.Helper()
 	h := testutil.FreshHost(t.TempDir())

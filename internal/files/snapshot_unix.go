@@ -1,28 +1,26 @@
+//go:build !windows
+
 package files
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"golang.org/x/sys/unix"
 	"golden-gate-setup/internal/domain"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 )
 
-type Manager struct {
-	Roots        []string
-	BeforeRename func() error
-	// SkipBackup replaces files without keeping their previous contents. Only
-	// the installer's own records use it; user configuration is always backed up.
-	SkipBackup bool
-}
+// IsRedirect reports whether err comes from a symlink, or a non-directory, on
+// the way to a path.
+func IsRedirect(err error) bool { return errors.Is(err, unix.ELOOP) || errors.Is(err, unix.ENOTDIR) }
 
-func digest(data []byte) string { s := sha256.Sum256(data); return hex.EncodeToString(s[:]) }
+// IsPrivate reports whether only the owner can read a file with this mode.
+func IsPrivate(mode fs.FileMode) bool { return mode.Perm()&0077 == 0 }
 
 // All descendants are traversed through directory descriptors with O_NOFOLLOW.
 // The selected root is opened once; replacing a parent cannot redirect a write.

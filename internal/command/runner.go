@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"golden-gate-setup/internal/domain"
 	"io"
-	"syscall"
 	"time"
 )
 
@@ -48,7 +47,7 @@ func (r ProcessRunner) Run(ctx context.Context, c domain.Command, out io.Writer)
 		case <-done:
 			return
 		case <-timer.C:
-			syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			kill(cmd)
 		}
 	}()
 	err := cmd.Wait()

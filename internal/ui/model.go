@@ -11,6 +11,7 @@ import (
 	"golden-gate-setup/internal/plan"
 	"io"
 	"os"
+	"runtime"
 	"strings"
 )
 
@@ -79,8 +80,12 @@ func cloneOptions(o domain.Options) domain.Options {
 	o.FileChoices = m
 	return o
 }
+
+// goos selects what the wizard offers; tests set it to try other platforms.
+var goos = runtime.GOOS
+
 func newModel(ctx context.Context, s Services) *model {
-	o := plan.DefaultOptions()
+	o := plan.DefaultOptionsFor(goos)
 	return &model{ctx: ctx, services: s, options: o, draft: cloneOptions(o), dark: true, stage: "welcome"}
 }
 func (m *model) commitDraft() { m.options = cloneOptions(m.draft) }

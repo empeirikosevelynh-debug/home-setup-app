@@ -5,7 +5,10 @@ import (
 	"context"
 	"errors"
 	"golden-gate-setup/internal/domain"
+	"golden-gate-setup/internal/plan"
+	"golden-gate-setup/internal/testutil"
 	"io"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -44,6 +47,9 @@ func TestCorruptSavedSessionIsReported(t *testing.T) {
 	}
 }
 func TestPlainProjectNameHasNoPlaceholder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("workspaces are macOS-only; plain mode takes /-rooted paths")
+	}
 	s := services(t)
 	path := t.TempDir() + "/project"
 	var out bytes.Buffer
@@ -94,4 +100,21 @@ type notifyReader struct {
 func (r *notifyReader) Read(p []byte) (int, error) {
 	r.once.Do(func() { close(r.entered) })
 	return r.Reader.Read(p)
+}
+func TestPlainWindowsQuestions(t *testing.T) {
+	onWindows(t)
+	h := testutil.FreshWindowsHost(t.TempDir())
+	var got domain.Options
+	s := Services{Inspect: func(_ context.Context, o domain.Options) (domain.Host, error) { got = o; return h, nil }, Build: plan.Build}
+	var out bytes.Buffer
+	if _, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nno\nno\nno\n"), &out); err != nil {
+		t.Fatal(err, out.String())
+	}
+	text := out.String()
+	if strings.Contains(text, "Fish plugins") || strings.Contains(text, "Homebrew") || strings.Contains(text, "workspace") || !strings.Contains(text, "fresh PC") {
+		t.Fatal("macOS questions asked on Windows:", text)
+	}
+	if strings.Join(got.Apps, ",") != "zed" || got.ConfigureGit || len(got.Plugins) != 0 {
+		t.Fatalf("answers lost: %+v", got)
+	}
 }

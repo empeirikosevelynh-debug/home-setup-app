@@ -8,4 +8,6 @@ Preservation/cancellation changes require behavior tests: declined replacements,
 
 Update asset provenance when templates change. Installer/bootstrap revisions require source review, checksum updates, and retained notices. Dependency changes require the complete race/terminal checks and a vulnerability scan.
 
+Windows code lives in `*_windows.go` files or behind `Host.OS == "windows"`. Keep macOS plans byte-identical when changing shared planning code. Check Windows builds with `GOOS=windows go vet ./...`; Unix-only tests carry `//go:build !windows`, and `*_windows_test.go` files run only on Windows.
+
 Record real-Mac acceptance separately from fixture success. Follow [release packaging](docs/releasing.md). Contributions are provided under this repository's MIT license.

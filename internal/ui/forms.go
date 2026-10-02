@@ -13,6 +13,10 @@ import (
 func welcomeForm(resume *bool, available bool, notice string, dark func() bool) *huh.Form {
 	title := "Migration first"
 	desc := "If reinstalling macOS, restore your files and settings with Migration Assistant before running setup. Existing configuration is preserved unless you review and accept a replacement."
+	if goos == "windows" {
+		title = "Restore first"
+		desc = "If you are moving to a new PC, restore your files from your backup before running setup. Existing configuration is preserved unless you review and accept a replacement."
+	}
 	if notice != "" {
 		desc += "\n\n" + notice
 	}
@@ -31,9 +35,17 @@ func selectionForm(o *domain.Options, dark func() bool) (*huh.Form, []*huh.Multi
 		}
 		return r
 	}
-	apps := huh.NewMultiSelect[string]().Title("Applications").Description("Warp, Zed and Applite recommended; Cork uses its official licensed installer.").Options(choices(plan.Apps)...).Value(&o.Apps)
-	plugins := huh.NewMultiSelect[string]().Title("Fish plugins").Description("Select each plugin explicitly. Existing custom plugins are preserved.").Options(choices(append(append([]string{}, plan.StartingPlugins...), plan.ExtraPlugins...))...).Value(&o.Plugins)
-	langs := huh.NewMultiSelect[string]().Title("Optional languages").Options(choices(plan.Languages)...).Value(&o.Languages)
+	offered := plan.Choices(goos)
+	if goos == "windows" {
+		apps := huh.NewMultiSelect[string]().Title("Applications").Description("Warp and Zed recommended; installed with Chocolatey.").Options(choices(offered.Apps)...).Value(&o.Apps)
+		langs := huh.NewMultiSelect[string]().Title("Optional languages").Options(choices(offered.Languages)...).Value(&o.Languages)
+		o.Workspaces = nil
+		groups := []*huh.Group{huh.NewGroup(apps), huh.NewGroup(langs), huh.NewGroup(huh.NewConfirm().Title("Configure Git display and editor?").Value(&o.ConfigureGit), huh.NewConfirm().Title("Adopt reviewed files into chezmoi?").Value(&o.AdoptChezmoi))}
+		return huh.NewForm(groups...).WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return formTheme(dark()) })), []*huh.MultiSelect[string]{apps, langs}
+	}
+	apps := huh.NewMultiSelect[string]().Title("Applications").Description("Warp, Zed and Applite recommended; Cork uses its official licensed installer.").Options(choices(offered.Apps)...).Value(&o.Apps)
+	plugins := huh.NewMultiSelect[string]().Title("Fish plugins").Description("Select each plugin explicitly. Existing custom plugins are preserved.").Options(choices(offered.Plugins)...).Value(&o.Plugins)
+	langs := huh.NewMultiSelect[string]().Title("Optional languages").Options(choices(offered.Languages)...).Value(&o.Languages)
 	groups := []*huh.Group{huh.NewGroup(apps), huh.NewGroup(plugins), huh.NewGroup(langs), huh.NewGroup(huh.NewConfirm().Title("Configure Git display and editor?").Value(&o.ConfigureGit), huh.NewConfirm().Title("Adopt reviewed files into chezmoi?").Value(&o.AdoptChezmoi), huh.NewConfirm().Title("Capture the complete Homebrew inventory?").Value(&o.CaptureInventory), huh.NewConfirm().Title("Prepare recovery notes and exclusions?").Value(&o.PrepareRecovery))}
 	work := make([]domain.Workspace, 3)
 	for i, l := range plan.Languages {
