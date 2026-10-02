@@ -10,12 +10,13 @@ import (
 	"golden-gate-setup/internal/ui"
 	"os"
 	"path/filepath"
+	"runtime"
 )
 
 func setupServices(probe func(context.Context, domain.Options) (domain.Host, error)) ui.Services {
 	home, homeErr := os.UserHomeDir()
 	runner := &command.ProcessRunner{}
-	store := apply.SessionStore{Dir: filepath.Join(home, "Library/Application Support/Golden Gate Setup/sessions"), Root: home}
+	store := apply.SessionStore{Dir: filepath.Join(apply.StateDir(runtime.GOOS, home), "sessions"), Root: home}
 	s := ui.Services{Inspect: probe, Build: plan.Build, LoadLatest: store.Latest}
 	s.BindHandoff = func(f func(context.Context, domain.Command) error) { runner.Handoff = f }
 	s.Apply = func(ctx context.Context, p domain.Plan, emit func(domain.Event)) (domain.Report, error) {

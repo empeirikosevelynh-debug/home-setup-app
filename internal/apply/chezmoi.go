@@ -16,7 +16,7 @@ import (
 
 func chezmoiConfig(ctx context.Context, h domain.Host) (string, func(), error) {
 	m := files.Manager{Roots: []string{h.Home}}
-	work := filepath.Join(h.Home, "Library/Application Support/Golden Gate Setup/work")
+	work := filepath.Join(StateDir(h.OS, h.Home), "work")
 	if e := m.EnsurePrivateDir(work); e != nil {
 		return "", nil, e
 	}
