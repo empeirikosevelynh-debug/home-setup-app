@@ -51,7 +51,7 @@ func (s SessionStore) Load(id string) (domain.Session, error) {
 	if !state.Exists {
 		return result, os.ErrNotExist
 	}
-	if state.Mode.Perm()&0077 != 0 {
+	if !files.IsPrivate(state.Mode) {
 		return result, errors.New("session permissions are not private")
 	}
 	decoder := json.NewDecoder(bytes.NewReader(state.Contents))
@@ -132,7 +132,7 @@ func (s SessionStore) Save(value domain.Session) error {
 	if e != nil {
 		return e
 	}
-	if before.Exists && before.Mode.Perm()&0077 != 0 {
+	if before.Exists && !files.IsPrivate(before.Mode) {
 		return errors.New("existing session is not private")
 	}
 	if e = m.EnsurePrivateDir(s.Dir); e != nil {

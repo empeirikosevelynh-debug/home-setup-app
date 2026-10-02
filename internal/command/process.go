@@ -7,23 +7,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
+// Process prepares a command. A non-interactive command gets its own process
+// group, so cancellation interrupts it and anything it started.
 func Process(ctx context.Context, c domain.Command) *exec.Cmd {
 	cmd := exec.CommandContext(ctx, c.Path, c.Args...)
 	cmd.Dir = c.Dir
 	cmd.Env = Environment(c)
-	if !c.Interactive {
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	}
-	cmd.Cancel = func() error {
-		if c.Interactive {
-			return cmd.Process.Signal(os.Interrupt)
-		}
-		return syscall.Kill(-cmd.Process.Pid, syscall.SIGINT)
-	}
+	isolate(cmd, c.Interactive)
 	cmd.WaitDelay = 4 * time.Second
 	return cmd
 }

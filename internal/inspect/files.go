@@ -1,8 +1,6 @@
 package inspect
 
 import (
-	"errors"
-	"golang.org/x/sys/unix"
 	"golden-gate-setup/internal/domain"
 	"golden-gate-setup/internal/files"
 	"os"
@@ -29,7 +27,7 @@ func ReadFileState(root, path string) (domain.FileState, error) {
 	}
 	rel, re := filepath.Rel(root, path)
 	outside := re != nil || rel == ".." || strings.HasPrefix(rel, "../")
-	if outside || errors.Is(e, unix.ELOOP) || errors.Is(e, unix.ENOTDIR) {
+	if outside || files.IsRedirect(e) {
 		s = domain.FileState{Path: path, Symlink: true}
 		st, err := os.Lstat(path)
 		if err == nil {
