@@ -8,6 +8,10 @@ type Options struct {
 	Workspaces                                                    []Workspace
 	ConfigureGit, AdoptChezmoi, CaptureInventory, PrepareRecovery bool
 	FileChoices                                                   map[string]FileDecision
+	// Bringing over a previous Mac. Empty values are left out of the JSON,
+	// so plans that do not use them keep their IDs.
+	PreviousBrewfile string   `json:",omitempty"`
+	PreviousPackages []string `json:",omitempty"`
 }
 type Workspace struct {
 	Language, Path, Module, EntryPoint string
@@ -28,6 +32,8 @@ type Host struct {
 	// inspection data, and the plan IDs derived from it, are unchanged.
 	ChocoPath, ChocoVersion, AppData string `json:",omitempty"`
 	Elevated                         bool   `json:",omitempty"`
+	// Read only when a previous Mac's app list is chosen.
+	Taps, PreviousEntries, PreviousOther []string `json:",omitempty"`
 }
 type InstalledPackage struct {
 	Version   string

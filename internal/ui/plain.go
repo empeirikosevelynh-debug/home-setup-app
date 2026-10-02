@@ -187,6 +187,11 @@ func RunPlain(ctx context.Context, s Services, in io.Reader, out io.Writer) (dom
 		}
 		o.Workspaces = append(o.Workspaces, domain.Workspace{Language: l, Path: path, Module: name, EntryPoint: entry, Create: create})
 	}
+	if goos != "windows" {
+		if e = askPrevious(p, &o); e != nil {
+			return domain.Report{}, e
+		}
+	}
 	h, e := s.Inspect(ctx, o)
 	if e != nil {
 		return domain.Report{}, e
@@ -246,4 +251,31 @@ func (p prompts) readLine() ([]byte, error) {
 		}
 		return line, nil
 	}
+}
+
+// askPrevious asks for the previous Mac's app list and which entries to
+// reinstall.
+func askPrevious(p prompts, o *domain.Options) error {
+	suggestion := "none"
+	home, _ := homeDir()
+	if found := recoveryInventories(home); len(found) > 0 {
+		suggestion = found[0]
+	}
+	path, e := p.ask("Previous app list: a Homebrew-full.Brewfile (none skips)", suggestion)
+	if e != nil || path == "none" {
+		o.PreviousBrewfile, o.PreviousPackages = "", nil
+		return e
+	}
+	entries, e := previousEntries(path)
+	if e != nil {
+		return fmt.Errorf("previous app list: %w", e)
+	}
+	fmt.Fprintf(p.out, "It lists %d apps and tools: %s\n", len(entries), strings.Join(entries, ", "))
+	answer, e := p.ask("Reinstall which? (all, none, or a comma list)", "all")
+	if e != nil {
+		return e
+	}
+	o.PreviousBrewfile = path
+	o.PreviousPackages, e = choosePrevious(answer, entries)
+	return e
 }

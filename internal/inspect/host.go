@@ -143,6 +143,11 @@ func (i Inspector) Read(ctx context.Context, o domain.Options) (domain.Host, err
 			return h, e
 		}
 	}
+	if h.OS != "windows" {
+		if err = i.readPrevious(ctx, &h, o); err != nil {
+			return h, err
+		}
+	}
 	for _, name := range []string{"fish", "starship", "zoxide", "chezmoi", "gh", "fzf", "fd", "bat", "eza", "rg", "delta", "lazygit", "git", "zed", "go", "gopls", "golangci-lint", "dlv", "crystal", "crystalline", "ameba", "nim", "nimble", "nimpretty", "nimlangserver"} {
 		if p, e := i.lookup(name); e == nil {
 			h.Tools[name] = p

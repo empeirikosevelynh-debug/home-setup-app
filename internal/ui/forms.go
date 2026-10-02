@@ -75,8 +75,34 @@ func selectionForm(o *domain.Options, dark func() bool) (*huh.Form, []*huh.Multi
 		fields = append(fields, huh.NewConfirm().Title("Create a new project if absent or empty?").Value(&w.Create))
 		groups = append(groups, huh.NewGroup(fields...).WithHideFunc(func() bool { return !plan.Has(o.Languages, w.Language) }))
 	}
+	previous, previousList := previousForm(o)
+	groups = append(groups, previous...)
+	return huh.NewForm(groups...).WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return formTheme(dark()) })), []*huh.MultiSelect[string]{apps, plugins, langs, previousList}
+}
 
-	return huh.NewForm(groups...).WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return formTheme(dark()) })), []*huh.MultiSelect[string]{apps, plugins, langs}
+// previousForm asks what to bring over from a previous Mac. Each question is
+// optional; the app list appears once a file is chosen, with every entry
+// selected unless restored choices say otherwise.
+func previousForm(o *domain.Options) ([]*huh.Group, *huh.MultiSelect[string]) {
+	home, _ := homeDir()
+	restored := o.PreviousBrewfile
+	list := huh.NewMultiSelect[string]().Title("Apps and tools to reinstall").Description("From your previous Mac's app list. Installed ones are skipped and nothing is upgraded.").OptionsFunc(func() []huh.Option[string] {
+		entries, _ := previousEntries(o.PreviousBrewfile)
+		all := o.PreviousBrewfile != restored || len(o.PreviousPackages) == 0
+		options := []huh.Option[string]{}
+		for _, e := range entries {
+			options = append(options, huh.NewOption(e, e).Selected(all || plan.Has(o.PreviousPackages, e)))
+		}
+		return options
+	}, &o.PreviousBrewfile).Value(&o.PreviousPackages).Filterable(true)
+	path := huh.NewInput().Title("Previous app list (optional)").Description("A Homebrew-full.Brewfile from a Golden Gate Recovery folder, to reinstall what your previous Mac had. Leave empty to skip.").Suggestions(recoveryInventories(home)).Value(&o.PreviousBrewfile).Validate(func(s string) error {
+		if s == "" {
+			return nil
+		}
+		_, e := previousEntries(s)
+		return e
+	})
+	return []*huh.Group{huh.NewGroup(path), huh.NewGroup(list).WithHideFunc(func() bool { return o.PreviousBrewfile == "" })}, list
 }
 func conflictChanges(s Services, h domain.Host, o domain.Options) []domain.FileChange {
 	trial := cloneOptions(o)

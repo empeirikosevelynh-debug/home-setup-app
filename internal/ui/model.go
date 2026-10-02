@@ -73,6 +73,7 @@ func cloneOptions(o domain.Options) domain.Options {
 	o.Plugins = append([]string(nil), o.Plugins...)
 	o.Languages = append([]string(nil), o.Languages...)
 	o.Workspaces = append([]domain.Workspace(nil), o.Workspaces...)
+	o.PreviousPackages = append([]string(nil), o.PreviousPackages...)
 	m := map[string]domain.FileDecision{}
 	for k, v := range o.FileChoices {
 		m[k] = v

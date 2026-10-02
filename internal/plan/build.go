@@ -59,8 +59,10 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 		}
 		p.Steps = append(p.Steps, s)
 	}
+	handled := map[string]bool{}
 	pkg := func(kind, token, minimum string) {
 		key := kind + ":" + token
+		handled[key] = true
 		if installed, ok := h.Packages[key]; ok {
 			if minimum != "" && !AtLeastVersion(installed.Version, minimum) {
 				p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "update:" + key, Title: "Review the required update for " + token, Instructions: "Selected features require " + token + " " + minimum + " or later. Update it deliberately in Cork or Homebrew, then inspect again.", Required: true})
@@ -113,6 +115,9 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 				pkg("formula", token, minimum)
 			}
 		}
+	}
+	if err := addPrevious(&p, h, o, handled, pkg, add); err != nil {
+		return p, err
 	}
 	config := []configFile{{"fish/config.fish", filepath.Join(h.Home, ".config/fish/config.fish")}, {"starship.toml", filepath.Join(h.Home, ".config/starship.toml")}, {"zed/settings.example.json", filepath.Join(h.Home, ".config/zed/settings.json")}, {"lazygit/config.yml", filepath.Join(h.LazyGitDir, "config.yml")}}
 	if o.PrepareRecovery && Has(o.Apps, "kopiaui") {
@@ -175,6 +180,42 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 		return p, err
 	}
 	return p, nil
+}
+
+// addPrevious plans the entries chosen from the previous Mac's app list:
+// taps first, then missing formulae and casks. Installed entries are left
+// as they are, and entries the catalog already handled are not repeated.
+func addPrevious(p *domain.Plan, h domain.Host, o domain.Options, handled map[string]bool, pkg func(kind, token, minimum string), add func(domain.Step)) error {
+	for _, key := range o.PreviousPackages {
+		if !Has(h.PreviousEntries, key) {
+			return fmt.Errorf("%s is not in the previous app list", key)
+		}
+	}
+	planned := func(id string) bool {
+		for _, s := range p.Steps {
+			if s.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	for _, key := range h.PreviousEntries {
+		if !Has(o.PreviousPackages, key) || handled[key] {
+			continue
+		}
+		kind, name, _ := strings.Cut(key, ":")
+		if kind == "tap" {
+			if !Has(h.Taps, name) && !planned("tap:"+name) {
+				add(domain.Step{ID: "tap:" + name, Label: "Tap " + name, Kind: "tap", Check: domain.Check{Kind: "tap", Target: name}})
+			}
+			continue
+		}
+		pkg(kind, name, "")
+	}
+	if o.PreviousBrewfile != "" && len(h.PreviousOther) > 0 {
+		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "previous-other", Title: "Reinstall the rest of your previous app list", Instructions: "These entries are not installed automatically; install the ones you still want yourself (App Store apps from the App Store): " + strings.Join(h.PreviousOther, "; "), Required: false})
+	}
+	return nil
 }
 
 type configFile struct{ asset, path string }

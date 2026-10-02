@@ -27,6 +27,7 @@ type Sandbox struct {
 	mu          sync.Mutex
 	packages    map[string]domain.InstalledPackage
 	plugins     []string
+	taps        []string
 	managed     map[string]bool
 	sourceDirty bool
 	calls       []domain.Command
@@ -118,6 +119,12 @@ func (s *Sandbox) Run(ctx context.Context, c domain.Command, w io.Writer) error 
 		switch c.Args[0] {
 		case "--prefix":
 			io.WriteString(w, "/opt/homebrew\n")
+		case "tap":
+			if len(c.Args) == 1 {
+				io.WriteString(w, strings.Join(s.taps, "\n"))
+			} else if !plan.Has(s.taps, c.Args[1]) {
+				s.taps = append(s.taps, c.Args[1])
+			}
 		case "info":
 			formulae := []map[string]any{}
 			casks := []map[string]any{}

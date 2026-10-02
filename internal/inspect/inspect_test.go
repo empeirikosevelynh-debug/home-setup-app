@@ -220,3 +220,28 @@ func TestMalformedChocolateyListRejected(t *testing.T) {
 		t.Fatal("malformed Chocolatey output became fresh state")
 	}
 }
+func TestPreviousAppListRead(t *testing.T) {
+	i, f := fixture(t)
+	f.Responses[brew+" tap"] = testutil.Response{Output: "homebrew/bundle\nuser/tools\n"}
+	dir := filepath.Join(t.TempDir(), "Golden Gate Recovery", "2026-09-30-abc")
+	os.MkdirAll(dir, 0700)
+	path := filepath.Join(dir, "Homebrew-full.Brewfile")
+	os.WriteFile(path, []byte("tap \"user/tools\"\nbrew \"jq\"\ncask \"firefox\"\nmas \"Keynote\", id: 409183694\n"), 0600)
+	o := plan.DefaultOptions()
+	o.PreviousBrewfile = path
+	h, e := i.Read(context.Background(), o)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if !reflect.DeepEqual(h.PreviousEntries, []string{"tap:user/tools", "formula:jq", "cask:firefox"}) || len(h.PreviousOther) != 1 || !reflect.DeepEqual(h.Taps, []string{"homebrew/bundle", "user/tools"}) {
+		t.Fatalf("previous app list misread: %q %q %q", h.PreviousEntries, h.PreviousOther, h.Taps)
+	}
+	link := filepath.Join(t.TempDir(), "link.Brewfile")
+	os.Symlink(path, link)
+	for _, bad := range []string{link, filepath.Join(dir, "missing.Brewfile"), "relative.Brewfile"} {
+		o.PreviousBrewfile = bad
+		if _, e := i.Read(context.Background(), o); e == nil {
+			t.Fatal("unusable previous app list accepted:", bad)
+		}
+	}
+}

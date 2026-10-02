@@ -8,6 +8,8 @@ import (
 	"golden-gate-setup/internal/command"
 	"golden-gate-setup/internal/domain"
 	"golden-gate-setup/internal/files"
+	"golden-gate-setup/internal/plan"
+	"io"
 	"path/filepath"
 	"strings"
 )
@@ -41,6 +43,11 @@ func OptionalHandlers(r command.Runner, m files.Manager) map[string]Handler {
 		}, Verify: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (bool, error) {
 			f, e := m.Inspect(s.Check.Target)
 			return e == nil && f.Exists && f.SHA256 == s.Check.Expected, e
+		}},
+		"tap": {Apply: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (domain.StepResult, error) {
+			return domain.StepResult{ID: s.ID}, r.Run(c, domain.Command{Path: h.BrewPath, Stream: true, Args: []string{"tap", s.Check.Target}, Env: []string{"HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1"}}, io.Discard)
+		}, Verify: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (bool, error) {
+			return plan.Has(h.Taps, s.Check.Target), nil
 		}},
 		"recovery": {Apply: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (domain.StepResult, error) {
 			dir := recoveryDir(h, p)
@@ -99,19 +106,9 @@ func inventorySatisfied(m files.Manager, h domain.Host, path string) (bool, erro
 		return false, e
 	}
 	found := map[string]bool{}
-	for _, line := range strings.Split(string(f.Contents), "\n") {
-		line = strings.TrimSpace(line)
-		for _, kind := range []string{"brew", "cask"} {
-			prefix := kind + " \""
-			if strings.HasPrefix(line, prefix) {
-				token := strings.Split(strings.TrimPrefix(line, prefix), "\"")[0]
-				key := kind
-				if kind == "brew" {
-					key = "formula"
-				}
-				found[key+":"+token] = true
-			}
-		}
+	entries, _ := plan.ParseBrewfile(f.Contents)
+	for _, key := range entries {
+		found[key] = true
 	}
 	for key, v := range h.Packages {
 		if strings.HasPrefix(key, "formula:") && v.OnRequest != nil && !*v.OnRequest {
