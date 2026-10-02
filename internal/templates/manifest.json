@@ -17,6 +17,11 @@
       "sha256": "369b962892b9df95c12c5c82088728bdad1e1b5764feaa487abea9acd6292538"
     },
     {
+      "asset": "zed/settings.windows.json",
+      "source": "warp-fish-zed-config/zed/settings.example.json, without the Fish terminal, Fish formatter and macOS option key settings",
+      "sha256": "7e115ef930c28eec36db871325f70bad70fc30d901e7fd692656b46b74fe1665"
+    },
+    {
       "asset": "lazygit/config.yml",
       "source": "warp-fish-zed-config/lazygit/config.yml",
       "sha256": "16ce5ead74d5a7ba87a6a51c71d842006d8d210ed8da68f26d4290a7e722292f"
