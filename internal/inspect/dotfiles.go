@@ -2,7 +2,9 @@ package inspect
 
 import (
 	"context"
-	"errors"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"golden-gate-setup/internal/command"
 	"golden-gate-setup/internal/domain"
@@ -11,6 +13,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -56,13 +59,13 @@ func (i Inspector) readDotfiles(ctx context.Context, h *domain.Host, o domain.Op
 		return nil
 	}
 	h.DotfilesState = "cloned"
-	h.DotfilesScripts = hasScripts(source)
+	h.DotfilesScripts, h.DotfilesRemovals = sourceFeatures(source)
 	work, err := os.MkdirTemp("", "golden-chezmoi-")
 	if err != nil {
 		return err
 	}
 	defer os.RemoveAll(work)
-	private := []string{"--persistent-state", filepath.Join(work, "state.boltdb"), "--cache", filepath.Join(work, "cache"), "--no-pager", "--no-tty"}
+	private := []string{"--persistent-state", filepath.Join(work, "state.boltdb"), "--cache", filepath.Join(work, "cache"), "--no-pager", "--no-tty", "--skip-secrets"}
 	listed, err := i.capture(ctx, chezmoi, append([]string{"managed", "--include=files,symlinks", "--path-style=absolute", "--nul-path-separator"}, private...)...)
 	if err != nil {
 		h.DotfilesProblem = "chezmoi managed failed (" + strings.TrimPrefix(err.Error(), chezmoi+" failed: ") + ")"
@@ -87,24 +90,31 @@ func (i Inspector) readDotfiles(ctx context.Context, h *domain.Host, o domain.Op
 	if err != nil {
 		return err
 	}
+	written := i.lastWritten(ctx, chezmoi)
 	for k, target := range targets {
-		if d, ok := restorable(root, source, sources[k], target, h.Home); ok {
-			state, err := ReadFileState(h.Home, target)
-			if err != nil {
-				return err
-			}
-			h.Files[target] = state
-			h.Dotfiles = append(h.Dotfiles, d)
+		d, ok := i.dotfile(ctx, chezmoi, private, root, source, sources[k], target, h.Home)
+		state, err := ReadFileState(h.Home, target)
+		if !ok || err != nil {
+			h.DotfilesManual = append(h.DotfilesManual, target)
 			continue
 		}
-		h.DotfilesManual = append(h.DotfilesManual, target)
+		h.Files[target] = state
+		d.Present = present(d, state, written[target])
+		h.Dotfiles = append(h.Dotfiles, d)
 	}
 	return nil
 }
 
-// restorable reads a source file setup can write as it is: a plain file,
-// directly in chezmoi's source, below this home, and at most 1 MiB.
-func restorable(root, source, path, target, home string) (domain.Dotfile, bool) {
+// risky names template functions that run commands, read secrets or reach
+// the network. Templates using them are not rendered while inspecting;
+// chezmoi renders them when it applies the reviewed file.
+var risky = regexp.MustCompile(`\b(output|outputList|exec|include|includeTemplate|template|onepassword\w*|bitwarden\w*|pass\w*|gopass\w*|keepassxc\w*|keeper\w*|lastpass\w*|vault|secret\w*|awsSecretsManager\w*|azureKeyVault\w*|dashlane\w*|doppler\w*|ejson\w*|hcpVaultSecret\w*|keyring|protonPass\w*|rbw\w*|gitHub\w*|decrypt)\b`)
+
+// dotfile describes one target chezmoi manages, with the contents chezmoi
+// will write when they can be known without running anything: plain files
+// and links from the source, templates rendered by chezmoi cat. Encrypted
+// files, modify scripts and risky templates are known only once applied.
+func (i Inspector) dotfile(ctx context.Context, chezmoi string, private []string, root, source, path, target, home string) (domain.Dotfile, bool) {
 	rel, err := filepath.Rel(source, path)
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || !filepath.IsAbs(target) {
 		return domain.Dotfile{}, false
@@ -117,32 +127,94 @@ func restorable(root, source, path, target, home string) (domain.Dotfile, bool) 
 			return domain.Dotfile{}, false
 		}
 	}
-	path = filepath.Join(root, rel)
-	state, err := (files.Manager{Roots: []string{root}}).Inspect(path)
-	if err != nil || !state.Exists {
+	src, err := (files.Manager{Roots: []string{root}}).Inspect(filepath.Join(root, rel))
+	if err != nil || !src.Exists {
 		return domain.Dotfile{}, false
 	}
-	plain, create, mode := plan.SourceAttributes(filepath.Base(path), int64(len(state.Contents)))
-	if !plain {
+	kind, create, ok := plan.SourceKind(filepath.Base(rel), int64(len(src.Contents)))
+	if !ok {
 		return domain.Dotfile{}, false
 	}
-	return domain.Dotfile{Target: target, Source: domain.FileSource{Root: root, Path: path, SHA256: state.SHA256}, Mode: mode, Create: create, Contents: state.Contents}, true
+	d := domain.Dotfile{Target: target, Kind: kind, Create: create}
+	switch kind {
+	case "file":
+		d.Contents = src.Contents
+	case "link":
+		d.Contents = []byte(strings.TrimSpace(string(src.Contents)))
+	case "template", "link-template":
+		if !risky.Match(src.Contents) {
+			out, err := i.captureRaw(ctx, chezmoi, append(append([]string{"cat"}, private...), "--", target)...)
+			if err == nil && len(out) == 0 {
+				return domain.Dotfile{}, false
+			}
+			if err == nil && kind == "link-template" {
+				out = []byte(strings.TrimSpace(string(out)))
+			}
+			if err == nil {
+				d.Contents = out
+			}
+		}
+	}
+	if d.Contents == nil {
+		d.Interactive = true
+		return d, true
+	}
+	sum := sha256.Sum256(d.Contents)
+	d.SHA256 = hex.EncodeToString(sum[:])
+	return d, true
 }
 
-// hasScripts reports whether the repository has chezmoi scripts, which
-// setup never runs.
-func hasScripts(source string) bool {
-	found := errors.New("found")
-	err := filepath.WalkDir(source, func(path string, d fs.DirEntry, err error) error {
-		switch {
+// present reports whether a target already has what chezmoi would write:
+// the same contents or link, or, when those are known only once applied,
+// what chezmoi itself last wrote there.
+func present(d domain.Dotfile, current domain.FileState, written string) bool {
+	if d.Kind == "link" || d.Kind == "link-template" {
+		link, err := os.Readlink(d.Target)
+		sum := sha256.Sum256([]byte(link))
+		return err == nil && (d.SHA256 == hex.EncodeToString(sum[:]) || d.SHA256 == "" && written == hex.EncodeToString(sum[:]))
+	}
+	if !current.Exists || current.Symlink {
+		return false
+	}
+	if d.SHA256 != "" {
+		return current.SHA256 == d.SHA256
+	}
+	return written != "" && current.SHA256 == written
+}
+
+// lastWritten reads, from chezmoi's own records, the contents it last wrote
+// to each target. It only reads.
+func (i Inspector) lastWritten(ctx context.Context, chezmoi string) map[string]string {
+	out, err := i.captureRaw(ctx, chezmoi, "state", "dump", "--format=json", "--no-pager", "--no-tty")
+	var dump struct {
+		EntryState map[string]struct {
+			ContentsSHA256 string `json:"contentsSHA256"`
+		} `json:"entryState"`
+	}
+	written := map[string]string{}
+	if err == nil && json.Unmarshal(out, &dump) == nil {
+		for target, entry := range dump.EntryState {
+			written[target] = strings.ToLower(entry.ContentsSHA256)
+		}
+	}
+	return written
+}
+
+// sourceFeatures reports whether the repository has scripts, which setup
+// never runs, and removals, which setup never makes.
+func sourceFeatures(source string) (scripts, removals bool) {
+	filepath.WalkDir(source, func(path string, d fs.DirEntry, err error) error {
+		switch name := d.Name(); {
 		case err != nil:
 			return nil
-		case d.IsDir() && d.Name() == ".git":
+		case d.IsDir() && name == ".git":
 			return filepath.SkipDir
-		case d.Name() == ".chezmoiscripts" || strings.HasPrefix(d.Name(), "run_"):
-			return found
+		case name == ".chezmoiscripts" || strings.HasPrefix(name, "run_"):
+			scripts = true
+		case name == ".chezmoiremove" || strings.HasPrefix(name, "remove_") || strings.HasPrefix(name, "exact_"):
+			removals = true
 		}
 		return nil
 	})
-	return err == found
+	return scripts, removals
 }

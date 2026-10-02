@@ -132,7 +132,7 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 	if err != nil {
 		return p, err
 	}
-	restored := addRestore(&p, h, o, add)
+	restored := addDotfiles(&p, h, o, add)
 	if later {
 		p.Later = "Configuration files, Git, Fish plugins, project workspaces, language tools, chezmoi and recovery records are planned in a second review, once the imported files are here."
 		p.ID, err = Fingerprint(p)

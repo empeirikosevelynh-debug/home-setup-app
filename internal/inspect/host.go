@@ -34,6 +34,12 @@ func (i Inspector) getenv(name string) string {
 }
 
 func (i Inspector) capture(ctx context.Context, path string, args ...string) (string, error) {
+	out, err := i.captureRaw(ctx, path, args...)
+	return strings.TrimSpace(string(out)), err
+}
+
+// captureRaw runs a read-only command and returns its output as it is.
+func (i Inspector) captureRaw(ctx context.Context, path string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	runner := i.Runner
@@ -42,7 +48,7 @@ func (i Inspector) capture(ctx context.Context, path string, args ...string) (st
 	}
 	var buf boundedBuffer
 	err := runner.Run(ctx, domain.Command{Path: path, Args: args, Env: []string{"HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "GIT_OPTIONAL_LOCKS=0"}}, &buf)
-	return strings.TrimSpace(buf.String()), err
+	return buf.Bytes(), err
 }
 
 type boundedBuffer struct{ bytes.Buffer }

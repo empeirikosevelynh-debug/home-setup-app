@@ -89,26 +89,9 @@ func (m Manager) ApplyContext(ctx context.Context, c domain.FileChange, backupDi
 		mode = before.Mode.Perm()
 	}
 	if before.Exists && !m.SkipBackup {
-		backupPath := filepath.Join(backupDir, digest([]byte(c.Path))+"-"+before.SHA256+".bak")
-		if _, e = m.parent(backupPath, true); e != nil {
+		if result.BackupPath, e = m.saveBackup(ctx, before, backupDir); e != nil {
 			return result, e
 		}
-		if e = ctx.Err(); e != nil {
-			return result, e
-		}
-		e = writeNew(backupPath, before.Contents, 0600)
-		if os.IsExist(e) {
-			old, re := snapshot(backupPath)
-			if re != nil || old.SHA256 != before.SHA256 {
-				e = fmt.Errorf("existing backup is not a valid private recovery copy")
-			} else {
-				e = nil
-			}
-		}
-		if e != nil {
-			return result, e
-		}
-		result.BackupPath = backupPath
 	}
 	var random [12]byte
 	if _, e = rand.Read(random[:]); e != nil {
@@ -142,4 +125,48 @@ func (m Manager) ApplyContext(ctx context.Context, c domain.FileChange, backupDi
 	}
 	result.Status = "applied"
 	return result, nil
+}
+
+// saveBackup writes a private copy of a file's reviewed contents, keeping an
+// identical copy that is already there.
+func (m Manager) saveBackup(ctx context.Context, before domain.FileState, backupDir string) (string, error) {
+	backupPath := filepath.Join(backupDir, digest([]byte(before.Path))+"-"+before.SHA256+".bak")
+	if _, e := m.parent(backupPath, true); e != nil {
+		return "", e
+	}
+	if e := ctx.Err(); e != nil {
+		return "", e
+	}
+	e := writeNew(backupPath, before.Contents, 0600)
+	if os.IsExist(e) {
+		old, re := snapshot(backupPath)
+		if re != nil || old.SHA256 != before.SHA256 {
+			return "", fmt.Errorf("existing backup is not a valid private recovery copy")
+		}
+		e = nil
+	}
+	return backupPath, e
+}
+
+// Backup saves a private copy of path before another program replaces it,
+// refusing a file that changed since it was reviewed.
+func (m Manager) Backup(ctx context.Context, path, sha, backupDir string) (string, error) {
+	if _, e := m.parent(path, false); e != nil {
+		return "", e
+	}
+	before, e := snapshot(path)
+	if e != nil {
+		return "", e
+	}
+	if !before.Exists || before.SHA256 != sha {
+		return "", fmt.Errorf("file changed since preview: %s", path)
+	}
+	return m.saveBackup(ctx, before, backupDir)
+}
+
+// EnsureParent creates the missing folders above path without following
+// links or junctions.
+func (m Manager) EnsureParent(path string) error {
+	_, e := m.parent(path, true)
+	return e
 }

@@ -148,25 +148,27 @@ func TestClearedSourcesDropTheirChoices(t *testing.T) {
 	}
 }
 
-func TestRestoredFileReviewShowsTheRepository(t *testing.T) {
+func TestDotfileReviewShowsTheRepository(t *testing.T) {
 	h := testutil.FreshHost(t.TempDir())
-	target := filepath.Join(h.Home, ".zshrc")
+	zshrc, secret := filepath.Join(h.Home, ".zshrc"), filepath.Join(h.Home, ".secret")
 	h.DotfilesState = "cloned"
-	h.Dotfiles = []domain.Dotfile{{Target: target, Source: domain.FileSource{Root: h.Home, Path: filepath.Join(h.Home, "dot_zshrc"), SHA256: "repo"}, Mode: 0644, Contents: []byte("export EDITOR=zed\n")}}
-	h.Files[target] = domain.FileState{Path: target, Exists: true, Mode: 0644, SHA256: "mine", Contents: []byte("export EDITOR=vi\n")}
+	h.Dotfiles = []domain.Dotfile{{Target: zshrc, Kind: "file", SHA256: "repo", Contents: []byte("export EDITOR=zed\n")}, {Target: secret, Kind: "encrypted", Interactive: true}}
+	for _, path := range []string{zshrc, secret} {
+		h.Files[path] = domain.FileState{Path: path, Exists: true, Mode: 0644, SHA256: "mine", Contents: []byte("export EDITOR=vi\n")}
+	}
 	o := plan.DefaultOptions()
 	o.DotfilesRepo = "you"
-	changes := conflictChanges(Services{Build: plan.Build}, h, o)
-	var restored *domain.FileChange
-	for i := range changes {
-		if changes[i].Path == target {
-			restored = &changes[i]
-		}
+	changes := map[string]domain.FileChange{}
+	for _, c := range conflictChanges(Services{Build: plan.Build}, h, o) {
+		changes[c.Path] = c
 	}
-	if restored == nil || restored.Desired != nil {
-		t.Fatal("restored file not offered for review", changes)
+	if len(changes) != 2 {
+		t.Fatal("dotfiles not offered for review", changes)
 	}
-	if diff := DiffText(h.Files[target].Contents, proposed(h, *restored)); !strings.Contains(diff, "-export EDITOR=vi") || !strings.Contains(diff, "+export EDITOR=zed") {
-		t.Fatal(diff)
+	if text := ChangeText(h, changes[zshrc]); !strings.Contains(text, "-export EDITOR=vi") || !strings.Contains(text, "+export EDITOR=zed") {
+		t.Fatal(text)
+	}
+	if text := ChangeText(h, changes[secret]); !strings.Contains(text, "is encrypted, so it can't be compared before applying") {
+		t.Fatal(text)
 	}
 }

@@ -72,43 +72,13 @@ func (m Manager) ApplyContext(ctx context.Context, c domain.FileChange, backupDi
 	if mode == 0 {
 		mode = 0644
 	}
-	// A replacement keeps the file's mode, except a restored file, which
-	// takes its repository's: a private file stays private.
-	if before.Exists && c.Source == nil {
+	if before.Exists {
 		mode = before.Mode.Perm()
 	}
 	if before.Exists && !m.SkipBackup {
-		backupName := digest([]byte(c.Path)) + "-" + before.SHA256 + ".bak"
-		backupPath := filepath.Join(backupDir, backupName)
-		bfd, bname, e := m.parent(backupPath, true)
-		if e != nil {
+		if result.BackupPath, e = m.saveBackup(ctx, before, backupDir); e != nil {
 			return result, e
 		}
-		if e = unix.Fchmod(bfd, 0700); e != nil {
-			unix.Close(bfd)
-			return result, e
-		}
-		if e = ctx.Err(); e != nil {
-			unix.Close(bfd)
-			return result, e
-		}
-		e = writeAt(bfd, bname, before.Contents, 0600)
-		if e == unix.EEXIST {
-			old, re := snapshot(bfd, bname, backupPath)
-			if re != nil || old.SHA256 != before.SHA256 || !IsPrivate(old.Mode) {
-				e = fmt.Errorf("existing backup is not a valid private recovery copy")
-			} else {
-				e = nil
-			}
-		}
-		if e == nil {
-			e = unix.Fsync(bfd)
-		}
-		unix.Close(bfd)
-		if e != nil {
-			return result, e
-		}
-		result.BackupPath = backupPath
 	}
 	var random [12]byte
 	if _, e = rand.Read(random[:]); e != nil {
@@ -147,4 +117,61 @@ func (m Manager) ApplyContext(ctx context.Context, c domain.FileChange, backupDi
 	}
 	result.Status = "applied"
 	return result, nil
+}
+
+// saveBackup writes a private copy of a file's reviewed contents, keeping an
+// identical copy that is already there.
+func (m Manager) saveBackup(ctx context.Context, before domain.FileState, backupDir string) (string, error) {
+	backupPath := filepath.Join(backupDir, digest([]byte(before.Path))+"-"+before.SHA256+".bak")
+	bfd, bname, e := m.parent(backupPath, true)
+	if e != nil {
+		return "", e
+	}
+	defer unix.Close(bfd)
+	if e = unix.Fchmod(bfd, 0700); e != nil {
+		return "", e
+	}
+	if e = ctx.Err(); e != nil {
+		return "", e
+	}
+	e = writeAt(bfd, bname, before.Contents, 0600)
+	if e == unix.EEXIST {
+		old, re := snapshot(bfd, bname, backupPath)
+		if re != nil || old.SHA256 != before.SHA256 || !IsPrivate(old.Mode) {
+			return "", fmt.Errorf("existing backup is not a valid private recovery copy")
+		}
+		e = nil
+	}
+	if e == nil {
+		e = unix.Fsync(bfd)
+	}
+	return backupPath, e
+}
+
+// Backup saves a private copy of path before another program replaces it,
+// refusing a file that changed since it was reviewed.
+func (m Manager) Backup(ctx context.Context, path, sha, backupDir string) (string, error) {
+	fd, name, e := m.parent(path, false)
+	if e != nil {
+		return "", e
+	}
+	defer unix.Close(fd)
+	before, e := snapshot(fd, name, path)
+	if e != nil {
+		return "", e
+	}
+	if !before.Exists || before.SHA256 != sha {
+		return "", fmt.Errorf("file changed since preview: %s", path)
+	}
+	return m.saveBackup(ctx, before, backupDir)
+}
+
+// EnsureParent creates the missing folders above path, privately, without
+// changing folders that exist or following links.
+func (m Manager) EnsureParent(path string) error {
+	fd, _, e := m.parent(path, true)
+	if e == nil {
+		unix.Close(fd)
+	}
+	return e
 }

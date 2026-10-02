@@ -34,9 +34,6 @@ func kinds(p domain.Plan) map[string]int {
 	r := map[string]int{}
 	for _, s := range p.Steps {
 		r[s.Kind]++
-		if s.File != nil && s.File.Source != nil {
-			r["restore"]++
-		}
 	}
 	return r
 }
@@ -75,13 +72,13 @@ func TestBringOverPreviousMac(t *testing.T) {
 	// Second review: the import, which leaves the repository's files alone,
 	// and the restore. Hidden folders leave the rest for a third review.
 	p = preview(t, s, o)
-	if k := kinds(p); p.Later == "" || k["import"] != 3 || k["restore"] != 2 || k["package"]+k["chezmoi-init"] != 0 {
+	if k := kinds(p); p.Later == "" || k["import"] != 3 || k["dotfile"] != 3 || k["package"]+k["chezmoi-init"] != 0 {
 		t.Fatalf("second review: %v %q", k, p.Later)
 	}
 	if r, err := x.Execute(ctx, p, nil); err != nil || r.Status != "complete" {
 		t.Fatal(err, r)
 	}
-	for path, want := range map[string]string{".zshrc": "repo zsh", ".editorconfig": "root = true", ".ssh/config": "Host old", "Documents/report.txt": "report", "Documents/notes.txt": "mine", ".config/starship.toml": "repo starship"} {
+	for path, want := range map[string]string{".zshrc": "repo zsh", ".editorconfig": "root = true", ".ssh/config": "Host old", "Documents/report.txt": "report", "Documents/notes.txt": "mine", ".config/starship.toml": "repo starship", ".gitconfig": "{{ .email }}"} {
 		if got := contents(t, filepath.Join(s.Home, path)); got != want {
 			t.Fatalf("%s: %q", path, got)
 		}
@@ -99,7 +96,7 @@ func TestBringOverPreviousMac(t *testing.T) {
 	// Third review: the rest of setup, keeping the repository's files.
 	p = preview(t, s, o)
 	k := kinds(p)
-	if p.Later != "" || k["import"]+k["restore"] != 0 || k["file"] == 0 {
+	if p.Later != "" || k["import"]+k["dotfile"] != 0 || k["file"] == 0 {
 		t.Fatalf("third review: %v %q", k, p.Later)
 	}
 	for _, step := range p.Steps {
@@ -117,7 +114,7 @@ func TestBringOverPreviousMac(t *testing.T) {
 	// Nothing is left to bring over.
 	s.ResetCalls()
 	p = preview(t, s, o)
-	if k := kinds(p); k["import"]+k["restore"]+k["chezmoi-init"]+k["tap"] != 0 {
+	if k := kinds(p); k["import"]+k["dotfile"]+k["chezmoi-init"]+k["tap"] != 0 {
 		h, _ := s.Inspect(ctx, o)
 		t.Fatalf("fourth review: %v %+v %+v", k, p.Steps, h.Import)
 	}

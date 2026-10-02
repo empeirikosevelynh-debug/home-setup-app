@@ -157,23 +157,29 @@ func conflictChanges(s Services, h domain.Host, o domain.Options) []domain.FileC
 func fileForm(changes []domain.FileChange, h domain.Host, replace []bool, dark func() bool) *huh.Form {
 	var groups []*huh.Group
 	for i, c := range changes {
-		groups = append(groups, huh.NewGroup(huh.NewConfirm().Title("Replace "+c.Path+"?").Description(DiffText(h.Files[c.Path].Contents, proposed(h, c))).Value(&replace[i])))
+		groups = append(groups, huh.NewGroup(huh.NewConfirm().Title("Replace "+c.Path+"?").Description(ChangeText(h, c)).Value(&replace[i])))
 	}
 	return huh.NewForm(groups...).WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return formTheme(dark()) }))
 }
 
-// proposed is what a change writes: its contents, or for a restored file,
-// the dotfiles repository's version read during inspection.
-func proposed(h domain.Host, c domain.FileChange) []byte {
-	if c.Source == nil {
-		return c.Desired
-	}
+// ChangeText shows a file change for review: a diff against what will be
+// written, or for a dotfile whose contents chezmoi produces only when it
+// applies them, what will happen instead.
+func ChangeText(h domain.Host, c domain.FileChange) string {
 	for _, d := range h.Dotfiles {
-		if d.Target == c.Path {
-			return d.Contents
+		if d.Target != c.Path {
+			continue
 		}
+		if d.SHA256 == "" {
+			what := map[string]string{"encrypted": "is encrypted", "modify": "is made by your repository's modify script", "template": "comes from a template that uses secrets or commands"}[d.Kind]
+			if what == "" {
+				what = "is known only when chezmoi applies it"
+			}
+			return "Your dotfiles' version " + what + ", so it can't be compared before applying. Default: keep yours. Replacing saves a private backup first; compare afterwards with chezmoi diff."
+		}
+		return DiffText(h.Files[c.Path].Contents, d.Contents)
 	}
-	return nil
+	return DiffText(h.Files[c.Path].Contents, c.Desired)
 }
 func DiffText(before, after []byte) string {
 	safe := func(data []byte) string {

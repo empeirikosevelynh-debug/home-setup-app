@@ -225,7 +225,7 @@ func reviewPlain(ctx context.Context, s Services, p prompts, in io.Reader, o dom
 		return domain.Report{}, domain.Plan{}, e
 	}
 	for _, c := range conflictChanges(s, h, o) {
-		fmt.Fprintln(out, c.Path+"\n"+DiffText(h.Files[c.Path].Contents, proposed(h, c)))
+		fmt.Fprintln(out, c.Path+"\n"+ChangeText(h, c))
 		yes, e := p.yes("Replace this file and save a private backup?", false)
 		if e != nil {
 			return domain.Report{}, domain.Plan{}, e

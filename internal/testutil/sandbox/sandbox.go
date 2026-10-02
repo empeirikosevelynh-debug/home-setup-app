@@ -4,6 +4,8 @@ package sandbox
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"golden-gate-setup/internal/command"
@@ -28,6 +30,7 @@ type Sandbox struct {
 	// contents.
 	Dotfiles    map[string]string
 	origin      string
+	written     map[string]string
 	mu          sync.Mutex
 	packages    map[string]domain.InstalledPackage
 	plugins     []string
@@ -241,6 +244,43 @@ func (s *Sandbox) Run(ctx context.Context, c domain.Command, w io.Writer) error 
 				s.origin = repo[0]
 			}
 			return os.MkdirAll(filepath.Join(src, ".git"), 0700)
+		case "cat":
+			sources := s.sources(src)
+			for _, target := range after(c.Args, "--") {
+				data, e := os.ReadFile(sources[target])
+				if e != nil {
+					return e
+				}
+				w.Write(data)
+			}
+		case "state":
+			entries := map[string]map[string]string{}
+			for target, sum := range s.written {
+				entries[target] = map[string]string{"type": "file", "contentsSHA256": sum}
+			}
+			return json.NewEncoder(w).Encode(map[string]any{"entryState": entries})
+		case "apply":
+			sources := s.sources(src)
+			for _, target := range after(c.Args, "--") {
+				data, e := os.ReadFile(sources[target])
+				if e != nil {
+					return e
+				}
+				if strings.Contains(filepath.Base(sources[target]), "symlink_") {
+					if e = os.Symlink(strings.TrimSpace(string(data)), target); e != nil {
+						return e
+					}
+					continue
+				}
+				if e = os.WriteFile(target, data, 0600); e != nil {
+					return e
+				}
+				sum := sha256.Sum256(data)
+				if s.written == nil {
+					s.written = map[string]string{}
+				}
+				s.written[target] = hex.EncodeToString(sum[:])
+			}
 		case "managed":
 			var paths []string
 			for p := range s.managed {

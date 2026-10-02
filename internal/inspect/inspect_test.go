@@ -3,6 +3,7 @@ package inspect_test
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"golden-gate-setup/internal/domain"
 	"golden-gate-setup/internal/inspect"
@@ -301,12 +302,17 @@ func (f runFunc) Run(c context.Context, d domain.Command, w io.Writer) error { r
 func TestDotfilesRead(t *testing.T) {
 	h := testutil.FreshHost(t.TempDir())
 	source := filepath.Join(h.Home, ".local/share/chezmoi")
-	for name, contents := range map[string]string{"dot_zshrc": "zsh", "private_dot_netrc": "machine example", "dot_gitconfig.tmpl": "{{ .email }}", "run_once_setup.sh": "true", ".git/config": "[core]"} {
+	for name, contents := range map[string]string{"dot_zshrc": "zsh", "private_dot_netrc.tmpl": "machine {{ .host }}", "dot_gitconfig.tmpl": "{{ output \"whoami\" }}", "encrypted_dot_secret.age": "age", "symlink_dot_vimrc": ".config/vim/vimrc\n", "exact_dot_old/dot_keep": "keep", "run_once_setup.sh": "true", ".git/config": "[core]"} {
 		os.MkdirAll(filepath.Dir(filepath.Join(source, name)), 0700)
 		os.WriteFile(filepath.Join(source, name), []byte(contents), 0600)
 	}
-	targets := map[string]string{filepath.Join(h.Home, ".zshrc"): "dot_zshrc", filepath.Join(h.Home, ".netrc"): "private_dot_netrc", filepath.Join(h.Home, ".gitconfig"): "dot_gitconfig.tmpl"}
-	origin, state := "https://github.com/you/dotfiles.git", ""
+	os.WriteFile(filepath.Join(h.Home, ".secret"), []byte("decrypted"), 0600)
+	os.MkdirAll(filepath.Join(h.Home, ".config/vim"), 0700)
+	os.WriteFile(filepath.Join(h.Home, ".config/vim/vimrc"), []byte("set nu"), 0600)
+	os.Symlink(".config/vim/vimrc", filepath.Join(h.Home, ".vimrc"))
+	targets := map[string]string{".zshrc": "dot_zshrc", ".netrc": "private_dot_netrc.tmpl", ".gitconfig": "dot_gitconfig.tmpl", ".secret": "encrypted_dot_secret.age", ".vimrc": "symlink_dot_vimrc", ".old/.keep": "exact_dot_old/dot_keep"}
+	decrypted := sha256.Sum256([]byte("decrypted"))
+	origin, state, rendered := "https://github.com/you/dotfiles.git", "", []string{}
 	r := runFunc(func(_ context.Context, c domain.Command, w io.Writer) error {
 		switch {
 		case c.Path == "/fake/git" && c.Args[len(c.Args)-1] == "remote.origin.url":
@@ -315,20 +321,25 @@ func TestDotfilesRead(t *testing.T) {
 		case c.Path == "/fake/chezmoi" && len(c.Args) == 1 && c.Args[0] == "source-path":
 			io.WriteString(w, source+"\n")
 		case c.Path == "/fake/chezmoi" && c.Args[0] == "managed":
-			for i, a := range c.Args {
-				if a == "--persistent-state" {
-					state = c.Args[i+1]
-				}
+			state = c.Args[slices.Index(c.Args, "--persistent-state")+1]
+			if !slices.Contains(c.Args, "--skip-secrets") {
+				return fmt.Errorf("secrets not skipped")
 			}
 			var listed []string
 			for target := range targets {
-				listed = append(listed, target)
+				listed = append(listed, filepath.Join(h.Home, target))
 			}
 			io.WriteString(w, strings.Join(listed, "\x00"))
 		case c.Path == "/fake/chezmoi" && c.Args[0] == "source-path":
 			for _, target := range c.Args[slices.Index(c.Args, "--")+1:] {
-				io.WriteString(w, filepath.Join(source, targets[target])+"\n")
+				rel, _ := filepath.Rel(h.Home, target)
+				io.WriteString(w, filepath.Join(source, targets[rel])+"\n")
 			}
+		case c.Path == "/fake/chezmoi" && c.Args[0] == "cat":
+			rendered = append(rendered, c.Args[len(c.Args)-1])
+			io.WriteString(w, "machine example.test\n")
+		case c.Path == "/fake/chezmoi" && c.Args[0] == "state":
+			fmt.Fprintf(w, `{"entryState":{%q:{"type":"file","contentsSHA256":%q}}}`, filepath.Join(h.Home, ".secret"), hex.EncodeToString(decrypted[:]))
 		default:
 			return fmt.Errorf("unexpected command %v", c)
 		}
@@ -353,18 +364,28 @@ func TestDotfilesRead(t *testing.T) {
 	if _, err := os.Stat(filepath.Dir(state)); state == "" || !os.IsNotExist(err) {
 		t.Fatal("chezmoi's temporary state was not removed:", state)
 	}
-	if got.DotfilesState != "cloned" || !got.DotfilesScripts || len(got.Dotfiles) != 2 || !reflect.DeepEqual(got.DotfilesManual, []string{filepath.Join(h.Home, ".gitconfig")}) {
-		t.Fatalf("dotfiles misread: %+v", got)
+	if got.DotfilesState != "cloned" || !got.DotfilesScripts || !got.DotfilesRemovals || len(got.Dotfiles) != 6 || len(got.DotfilesManual) != 0 {
+		t.Fatalf("dotfiles misread: %+v %q", got.Dotfiles, got.DotfilesManual)
 	}
-	modes := map[string]fs.FileMode{}
+	byName := map[string]domain.Dotfile{}
 	for _, d := range got.Dotfiles {
-		modes[filepath.Base(d.Target)] = d.Mode
-		if d.Source.Root == "" || d.Source.SHA256 == "" || len(d.Contents) == 0 {
-			t.Fatalf("%+v", d)
-		}
+		rel, _ := filepath.Rel(h.Home, d.Target)
+		byName[rel] = d
 	}
-	if modes[".zshrc"] != 0644 || modes[".netrc"] != 0600 {
-		t.Fatal(modes)
+	if d := byName[".zshrc"]; d.Kind != "file" || string(d.Contents) != "zsh" || d.SHA256 == "" || d.Present || d.Interactive {
+		t.Fatalf("plain file: %+v", d)
+	}
+	if d := byName[".netrc"]; d.Kind != "template" || string(d.Contents) != "machine example.test\n" || d.SHA256 == "" || !reflect.DeepEqual(rendered, []string{filepath.Join(h.Home, ".netrc")}) {
+		t.Fatalf("template not rendered once by chezmoi: %+v %q", d, rendered)
+	}
+	if d := byName[".gitconfig"]; d.Kind != "template" || d.SHA256 != "" || !d.Interactive {
+		t.Fatalf("a template that runs commands was rendered: %+v", d)
+	}
+	if d := byName[".secret"]; d.Kind != "encrypted" || d.SHA256 != "" || !d.Interactive || !d.Present {
+		t.Fatalf("encrypted file chezmoi wrote not recognized: %+v", d)
+	}
+	if d := byName[".vimrc"]; d.Kind != "link" || !d.Present {
+		t.Fatalf("matching link not recognized: %+v", d)
 	}
 	origin = "https://github.com/someone/dotfiles.git"
 	if got, err = i.Read(context.Background(), o); err != nil || got.DotfilesState != "other" || got.DotfilesOrigin != origin {

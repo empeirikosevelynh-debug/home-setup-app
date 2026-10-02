@@ -3,7 +3,6 @@ package plan
 import (
 	"fmt"
 	"golden-gate-setup/internal/domain"
-	"io/fs"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -61,50 +60,58 @@ func SameRepo(origin, repo string) bool {
 	return origin != "" && repoKey(origin) == repoKey(repo)
 }
 
-// SourceAttributes reads what chezmoi does with a source file from its
-// name. Plain files are written as they are, with mode; create files only
-// where nothing is. Templates, encrypted, modify and script files, links
-// and empty files without empty_ need chezmoi itself.
-func SourceAttributes(name string, size int64) (plain, create bool, mode fs.FileMode) {
-	if literal, ok := strings.CutSuffix(name, ".literal"); ok {
+// SourceKind reads what chezmoi does with a source file from its name: a
+// plain file, a template, an encrypted file, a link or a modify script, and
+// whether it is only created where nothing is. ok is false for entries
+// that are not files chezmoi writes, such as scripts and removals, and for
+// empty files without empty_, which chezmoi removes instead.
+func SourceKind(name string, size int64) (kind string, create, ok bool) {
+	templated := false
+	if literal, found := strings.CutSuffix(name, ".literal"); found {
 		name = literal
-	} else if strings.HasSuffix(name, ".tmpl") {
-		return false, false, 0
+	} else {
+		name, templated = strings.CutSuffix(name, ".tmpl")
 	}
 	name, create = strings.CutPrefix(name, "create_")
-	for _, kind := range []string{"modify_", "remove_", "run_", "symlink_", "encrypted_"} {
-		if strings.HasPrefix(name, kind) {
-			return false, false, 0
+	kind = "file"
+	switch {
+	case strings.HasPrefix(name, "remove_") || strings.HasPrefix(name, "run_"):
+		return "", false, false
+	case strings.HasPrefix(name, "modify_"):
+		return "modify", false, true
+	case strings.HasPrefix(name, "symlink_"):
+		kind = "link"
+	case strings.HasPrefix(name, "encrypted_"):
+		return "encrypted", create, true
+	}
+	if templated {
+		if kind == "link" {
+			return "link-template", false, true
 		}
+		return "template", create, true
 	}
-	name, private := strings.CutPrefix(name, "private_")
-	name, readonly := strings.CutPrefix(name, "readonly_")
-	name, empty := strings.CutPrefix(name, "empty_")
-	_, executable := strings.CutPrefix(name, "executable_")
-	mode = 0666
-	if executable {
-		mode = 0777
+	for _, prefix := range []string{"private_", "readonly_"} {
+		name = strings.TrimPrefix(name, prefix)
 	}
-	if private {
-		mode &^= 0077
+	if _, empty := strings.CutPrefix(name, "empty_"); kind == "file" && size == 0 && !empty {
+		return "", false, false
 	}
-	if readonly {
-		mode &^= 0222
-	}
-	if size == 0 && !empty {
-		return false, false, 0
-	}
-	return true, create, mode &^ 0022
+	return kind, create, true
 }
 
-// dotfileTargets lists everything chezmoi manages once the repository is
-// cloned, and the folders that belong to chezmoi itself; the folder import
-// leaves them all alone.
+// dotfileTargets lists what the folder import leaves alone: chezmoi's
+// state, which would mark run-once scripts as run, and once a repository
+// is chosen, its configuration, its source and everything it manages.
 func dotfileTargets(h domain.Host, o domain.Options) []string {
-	if o.DotfilesRepo == "" || h.DotfilesState != "cloned" {
-		return nil
+	config := filepath.Join(h.Home, ".config/chezmoi")
+	targets := []string{filepath.Join(config, "chezmoistate.boltdb")}
+	if o.DotfilesRepo == "" {
+		return targets
 	}
-	targets := []string{DotfilesSource(h), filepath.Join(h.Home, ".config/chezmoi")}
+	targets = append(targets, DotfilesSource(h))
+	for _, format := range []string{"toml", "yaml", "json", "jsonc"} {
+		targets = append(targets, filepath.Join(config, "chezmoi."+format))
+	}
 	for _, d := range h.Dotfiles {
 		targets = append(targets, d.Target)
 	}
@@ -157,27 +164,60 @@ func homeList(home string, paths []string) string {
 	return strings.Join(names, ", ")
 }
 
-// addRestore plans the repository's plain files through the usual review:
-// created where missing, kept where different unless a replacement is
-// approved. It returns every target the repository manages, which the
-// starter templates leave alone.
-func addRestore(p *domain.Plan, h domain.Host, o domain.Options, add func(domain.Step)) map[string]bool {
-	restored := map[string]bool{}
+// DotfileCommand is how chezmoi applies one reviewed target: only that
+// target, without scripts, removals or folder changes, and without asking,
+// since setup has already backed up a file it replaces.
+func DotfileCommand(target string, interactive bool) *domain.Command {
+	args := []string{"apply", "--force", "--exclude=scripts,remove,dirs", "--no-pager"}
+	if !interactive {
+		args = append(args, "--no-tty")
+	}
+	return &domain.Command{Args: append(args, "--", target), Interactive: interactive}
+}
+
+// dotfileLabel describes a dotfile step in the plan.
+func dotfileLabel(h domain.Host, d domain.Dotfile, replace bool) string {
+	label := "chezmoi: create " + homeList(h.Home, []string{d.Target})
+	if replace {
+		label = "chezmoi: replace " + homeList(h.Home, []string{d.Target})
+	}
+	switch d.Kind {
+	case "template", "link-template":
+		label += " (template)"
+	case "encrypted":
+		label += " (encrypted; may ask for your passphrase)"
+	case "modify":
+		label += " (your repository's modify script edits it)"
+	case "link":
+		label += " (link)"
+	}
+	if replace {
+		label += "; backup saved first"
+	}
+	return label
+}
+
+// addDotfiles plans what chezmoi applies through the usual review: targets
+// created where missing, and existing ones replaced only when approved,
+// after a backup. It returns every target the repository manages, which
+// the starter configuration leaves alone.
+func addDotfiles(p *domain.Plan, h domain.Host, o domain.Options, add func(domain.Step)) map[string]bool {
+	managed := map[string]bool{}
 	if o.DotfilesRepo == "" || h.DotfilesState != "cloned" {
-		return restored
+		return managed
 	}
 	manual := append([]string(nil), h.DotfilesManual...)
 	var kept []string
 	for _, d := range h.Dotfiles {
-		restored[d.Target] = true
+		managed[d.Target] = true
 		if !within(h.Home, d.Target) || d.Target == h.Home {
 			manual = append(manual, d.Target)
 			continue
 		}
-		before := h.Files[d.Target]
-		if before.Exists && !before.Symlink && before.SHA256 == d.Source.SHA256 {
+		if d.Present {
 			continue
 		}
+		before := h.Files[d.Target]
 		decision := domain.Create
 		if before.Exists {
 			if d.Create {
@@ -192,28 +232,26 @@ func addRestore(p *domain.Plan, h domain.Host, o domain.Options, add func(domain
 				continue
 			}
 		}
-		source := d.Source
-		change := domain.FileChange{Path: d.Target, BeforeSHA256: before.SHA256, BeforeExists: before.Exists, Mode: d.Mode, Decision: decision, Source: &source}
-		add(domain.Step{ID: "file:" + d.Target, Label: "Restore " + homeList(h.Home, []string{d.Target}) + " from your dotfiles", Kind: "file", File: &change, Check: domain.Check{Kind: "file", Target: d.Target, Expected: source.SHA256}})
+		change := domain.FileChange{Path: d.Target, BeforeSHA256: before.SHA256, BeforeExists: before.Exists, Mode: before.Mode, Decision: decision}
+		add(domain.Step{ID: "dotfile:" + d.Target, Label: dotfileLabel(h, d, before.Exists), Kind: "dotfile", File: &change, Command: DotfileCommand(d.Target, d.Interactive), Check: domain.Check{Kind: "dotfile", Target: d.Target, Expected: d.SHA256}})
 	}
 	for _, target := range h.DotfilesManual {
-		restored[target] = true
+		managed[target] = true
 	}
 	switch {
 	case h.DotfilesProblem != "":
-		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "dotfiles-chezmoi", Title: "Restore your dotfiles with chezmoi", Instructions: "Setup could not list your dotfiles: " + h.DotfilesProblem + ". Review the changes with chezmoi diff, then apply them with chezmoi apply.", Required: false})
-	case len(manual) > 0 || h.DotfilesScripts:
-		text := ""
-		if len(manual) > 0 {
-			text = "These need chezmoi itself (templates, encrypted or modified files, links): " + homeList(h.Home, manual) + ". "
-		}
-		if h.DotfilesScripts {
-			text += "Setup does not run your repository's scripts. "
-		}
-		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "dotfiles-chezmoi", Title: "Finish restoring your dotfiles", Instructions: text + "Review the changes with chezmoi diff, then apply them with chezmoi apply.", Required: false})
+		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "dotfiles-chezmoi", Title: "Apply your dotfiles with chezmoi", Instructions: "Setup could not list your dotfiles: " + h.DotfilesProblem + ". Review the changes with chezmoi diff, then apply them with chezmoi apply.", Required: false})
+	case len(manual) > 0:
+		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "dotfiles-chezmoi", Title: "Finish applying your dotfiles", Instructions: "These are outside your home folder or come from an external source, so setup leaves them to chezmoi: " + homeList(h.Home, manual) + ". Review them with chezmoi diff, then apply them with chezmoi apply.", Required: false})
+	}
+	if h.DotfilesScripts {
+		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "dotfiles-scripts", Title: "Run your dotfiles' scripts", Instructions: "Setup does not run your repository's scripts. Review them in chezmoi's source, then run them with chezmoi apply --include=scripts.", Required: false})
+	}
+	if h.DotfilesRemovals {
+		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "dotfiles-removals", Title: "Review what your dotfiles remove", Instructions: "Your repository removes files (remove_ entries, exact_ folders or .chezmoiremove). Setup never deletes anything; review with chezmoi diff and apply removals yourself with chezmoi apply.", Required: false})
 	}
 	if len(kept) > 0 {
 		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "dotfiles-kept", Title: "Compare the dotfiles kept here", Instructions: "Your dotfiles repository has other versions of " + homeList(h.Home, kept) + ". The files here were kept; compare them with chezmoi diff and apply the ones you want with chezmoi apply followed by their paths.", Required: false})
 	}
-	return restored
+	return managed
 }

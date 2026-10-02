@@ -4,7 +4,6 @@ import (
 	"golden-gate-setup/internal/domain"
 	"golden-gate-setup/internal/plan"
 	"golden-gate-setup/internal/testutil"
-	"io/fs"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -34,37 +33,37 @@ func TestSameRepo(t *testing.T) {
 	}
 }
 
-func TestSourceAttributes(t *testing.T) {
+func TestSourceKind(t *testing.T) {
 	type want struct {
-		plain, create bool
-		mode          fs.FileMode
+		kind       string
+		create, ok bool
 	}
 	for name, w := range map[string]want{
-		"dot_zshrc":                 {true, false, 0644},
-		"private_dot_netrc":         {true, false, 0600},
-		"executable_dot_tool":       {true, false, 0755},
-		"private_executable_tool":   {true, false, 0700},
-		"readonly_dot_profile":      {true, false, 0444},
-		"create_private_dot_npmrc":  {true, true, 0600},
-		"dot_notes.tmpl.literal":    {true, false, 0644},
-		"literal_run_me":            {true, false, 0644},
-		"dot_gitconfig.tmpl":        {},
-		"encrypted_private_dot_key": {},
-		"modify_dot_settings":       {},
-		"symlink_dot_vimrc":         {},
-		"run_once_install.sh":       {},
-		"remove_dot_old":            {},
+		"dot_zshrc":                        {"file", false, true},
+		"private_executable_tool":          {"file", false, true},
+		"create_private_dot_npmrc":         {"file", true, true},
+		"dot_notes.tmpl.literal":           {"file", false, true},
+		"literal_run_me":                   {"file", false, true},
+		"dot_gitconfig.tmpl":               {"template", false, true},
+		"create_dot_npmrc.tmpl":            {"template", true, true},
+		"encrypted_private_dot_key.age":    {"encrypted", false, true},
+		"modify_dot_settings":              {"modify", false, true},
+		"symlink_dot_vimrc":                {"link", false, true},
+		"symlink_dot_vimrc.tmpl":           {"link-template", false, true},
+		"run_once_install.sh":              {"", false, false},
+		"remove_dot_old":                   {"", false, false},
+		"encrypted_private_dot_netrc.tmpl": {"encrypted", false, true},
 	} {
-		plain, create, mode := plan.SourceAttributes(name, 10)
-		if plain != w.plain || create != w.create || mode != w.mode {
-			t.Fatal(name, plain, create, mode)
+		kind, create, ok := plan.SourceKind(name, 10)
+		if kind != w.kind || create != w.create || ok != w.ok {
+			t.Fatal(name, kind, create, ok)
 		}
 	}
-	if plain, _, _ := plan.SourceAttributes("dot_hushlogin", 0); plain {
+	if _, _, ok := plan.SourceKind("dot_hushlogin", 0); ok {
 		t.Fatal("an empty file without empty_ is removed by chezmoi, not written")
 	}
-	if plain, _, mode := plan.SourceAttributes("empty_dot_hushlogin", 0); !plain || mode != 0644 {
-		t.Fatal("empty_ file not restored")
+	if kind, _, ok := plan.SourceKind("empty_dot_hushlogin", 0); !ok || kind != "file" {
+		t.Fatal("empty_ file not offered")
 	}
 }
 
@@ -73,25 +72,26 @@ func dotfilesHost(t *testing.T) (domain.Host, domain.Options) {
 	o := plan.DefaultOptions()
 	o.RecoveryDate = "2026-10-02"
 	o.DotfilesRepo = "you"
-	source := filepath.Join(h.Home, ".local/share/chezmoi")
-	restore := func(target, name, sum string, mode fs.FileMode, create bool) domain.Dotfile {
-		return domain.Dotfile{Target: filepath.Join(h.Home, target), Source: domain.FileSource{Root: source, Path: filepath.Join(source, name), SHA256: sum}, Mode: mode, Create: create, Contents: []byte("from the repository")}
+	dotfile := func(target, kind, sum string, create bool) domain.Dotfile {
+		return domain.Dotfile{Target: filepath.Join(h.Home, target), Kind: kind, SHA256: sum, Create: create, Interactive: sum == "", Contents: []byte("from the repository")}
 	}
 	h.DotfilesState = "cloned"
 	h.Dotfiles = []domain.Dotfile{
-		restore(".zshrc", "dot_zshrc", "zshrc", 0644, false),
-		restore(".config/fish/config.fish", "dot_config/fish/config.fish", "fish", 0644, false),
-		restore(".npmrc", "create_private_dot_npmrc", "npmrc", 0600, true),
-		restore(".netrc", "private_dot_netrc", "netrc", 0600, false),
+		dotfile(".zshrc", "file", "zshrc", false),
+		dotfile(".gitconfig", "template", "gitconfig", false),
+		dotfile(".ssh/config", "encrypted", "", false),
+		dotfile(".config/fish/config.fish", "file", "fish", false),
+		dotfile(".npmrc", "file", "npmrc", true),
+		dotfile(".netrc", "encrypted", "", false),
+		dotfile(".profile", "file", "profile", false),
 	}
-	h.DotfilesManual = []string{filepath.Join(h.Home, ".gitconfig")}
-	h.DotfilesScripts = true
-	for _, existing := range []string{".config/fish/config.fish", ".npmrc"} {
+	h.Dotfiles[6].Present = true
+	h.DotfilesManual = []string{"/etc/outside"}
+	h.DotfilesScripts, h.DotfilesRemovals = true, true
+	for _, existing := range []string{".config/fish/config.fish", ".npmrc", ".netrc"} {
 		path := filepath.Join(h.Home, existing)
 		h.Files[path] = domain.FileState{Path: path, Exists: true, Mode: 0644, SHA256: "mine", Contents: []byte("mine")}
 	}
-	netrc := filepath.Join(h.Home, ".netrc")
-	h.Files[netrc] = domain.FileState{Path: netrc, Exists: true, Mode: 0600, SHA256: "netrc"}
 	return h, o
 }
 
@@ -122,21 +122,31 @@ func TestDotfilesClonedFirst(t *testing.T) {
 	}
 }
 
-func TestDotfilesRestorePlanned(t *testing.T) {
+func TestDotfilesPlanned(t *testing.T) {
 	h, o := dotfilesHost(t)
 	p, err := plan.Build(h, o)
 	if err != nil || p.Later != "" {
 		t.Fatal(err, p.Later)
 	}
-	var restores []domain.Step
-	for _, s := range steps(p, "file") {
-		if s.File.Source != nil {
-			restores = append(restores, s)
+	labels := map[string]domain.Step{}
+	for _, s := range steps(p, "dotfile") {
+		labels[s.Label] = s
+	}
+	want := []string{"chezmoi: create ~/.zshrc", "chezmoi: create ~/.gitconfig (template)", "chezmoi: create ~/.ssh/config (encrypted; may ask for your passphrase)"}
+	if len(labels) != len(want) {
+		t.Fatalf("dotfile steps: %+v", labels)
+	}
+	for _, label := range want {
+		if _, ok := labels[label]; !ok {
+			t.Fatalf("missing %q in %+v", label, labels)
 		}
 	}
-	zshrc := filepath.Join(h.Home, ".zshrc")
-	if len(restores) != 1 || restores[0].File.Path != zshrc || restores[0].File.Desired != nil || restores[0].Check.Expected != "zshrc" || restores[0].File.Decision != domain.Create || restores[0].Label != "Restore ~/.zshrc from your dotfiles" {
-		t.Fatalf("restores: %+v", restores)
+	zshrc := labels[want[0]]
+	if zshrc.File.Desired != nil || zshrc.Check.Expected != "zshrc" || strings.Join(zshrc.Command.Args, " ") != "apply --force --exclude=scripts,remove,dirs --no-pager --no-tty -- "+filepath.Join(h.Home, ".zshrc") || zshrc.Command.Interactive {
+		t.Fatalf("%+v", zshrc)
+	}
+	if ssh := labels[want[2]]; !ssh.Command.Interactive || ssh.Check.Expected != "" {
+		t.Fatalf("encrypted file not handed the terminal: %+v", ssh)
 	}
 	for _, s := range p.Steps {
 		if s.ID == "file:"+filepath.Join(h.Home, ".config/fish/config.fish") || s.Kind == "git" {
@@ -144,24 +154,29 @@ func TestDotfilesRestorePlanned(t *testing.T) {
 		}
 	}
 	kept := task(p, "dotfiles-kept")
-	if kept == nil || !strings.Contains(kept.Instructions, "~/.config/fish/config.fish") || strings.Contains(kept.Instructions, ".npmrc") {
+	if kept == nil || !strings.Contains(kept.Instructions, "~/.config/fish/config.fish") || !strings.Contains(kept.Instructions, "~/.netrc") || strings.Contains(kept.Instructions, ".npmrc") {
 		t.Fatalf("kept files: %+v", kept)
 	}
-	rest := task(p, "dotfiles-chezmoi")
-	if rest == nil || !strings.Contains(rest.Instructions, "~/.gitconfig") || !strings.Contains(rest.Instructions, "scripts") || task(p, "git-dotfiles") == nil {
-		t.Fatalf("follow-ups: %+v", p.ManualTasks)
+	for _, id := range []string{"dotfiles-chezmoi", "dotfiles-scripts", "dotfiles-removals", "git-dotfiles"} {
+		if task(p, id) == nil {
+			t.Fatal("missing follow-up", id, p.ManualTasks)
+		}
 	}
-	// An approved replacement restores the repository's version.
+	// Approved replacements are applied by chezmoi after a backup, even when
+	// the repository's version is known only once applied.
 	o.FileChoices[filepath.Join(h.Home, ".config/fish/config.fish")] = domain.Replace
+	o.FileChoices[filepath.Join(h.Home, ".netrc")] = domain.Replace
 	if p, err = plan.Build(h, o); err != nil {
 		t.Fatal(err)
 	}
-	found := false
-	for _, s := range steps(p, "file") {
-		found = found || s.File.Source != nil && s.File.Decision == domain.Replace && s.File.BeforeSHA256 == "mine"
+	replaced := 0
+	for _, s := range steps(p, "dotfile") {
+		if s.File.Decision == domain.Replace && s.File.BeforeSHA256 == "mine" && strings.Contains(s.Label, "backup saved first") {
+			replaced++
+		}
 	}
-	if !found {
-		t.Fatal("approved replacement not planned")
+	if replaced != 2 || task(p, "dotfiles-kept") != nil {
+		t.Fatal("approved replacements not planned", replaced)
 	}
 }
 
@@ -169,7 +184,7 @@ func TestImportLeavesDotfilesAlone(t *testing.T) {
 	h, o := dotfilesHost(t)
 	o.ImportFrom = oldHome
 	top, local := plan.ImportJob(h, o, "."), plan.ImportJob(h, o, ".local")
-	for _, want := range []string{".zshrc", ".netrc", ".gitconfig"} {
+	for _, want := range []string{".zshrc", ".netrc", ".gitconfig", ".profile"} {
 		found := false
 		for _, e := range top.Exclude {
 			found = found || e == filepath.Join(h.Home, want)
@@ -180,6 +195,16 @@ func TestImportLeavesDotfilesAlone(t *testing.T) {
 	}
 	if len(local.Exclude) != 1 || local.Exclude[0] != filepath.Join(h.Home, ".local/share/chezmoi") {
 		t.Fatal("chezmoi's source not excluded:", local.Exclude)
+	}
+	config := plan.ImportJob(h, o, ".config")
+	for _, want := range []string{"chezmoi/chezmoi.toml", "chezmoi/chezmoistate.boltdb", "fish/config.fish"} {
+		found := false
+		for _, e := range config.Exclude {
+			found = found || e == filepath.Join(h.Home, ".config", want)
+		}
+		if !found {
+			t.Fatal(want, "not excluded from", config.Exclude)
+		}
 	}
 	if documents := plan.ImportJob(h, o, "Documents"); len(documents.Exclude) != 0 {
 		t.Fatal(documents.Exclude)

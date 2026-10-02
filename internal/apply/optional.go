@@ -65,6 +65,16 @@ func OptionalHandlers(r command.Runner, m files.Manager) map[string]Handler {
 			}
 			return m.Imported(c, *s.Import)
 		}},
+		"dotfile": {Apply: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (domain.StepResult, error) {
+			return applyDotfile(c, h, s, d, m, r)
+		}, Verify: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (bool, error) {
+			for _, dotfile := range h.Dotfiles {
+				if dotfile.Target == s.Check.Target {
+					return dotfile.Present, nil
+				}
+			}
+			return false, nil
+		}},
 		"chezmoi-init": {Apply: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (domain.StepResult, error) {
 			if s.Command == nil {
 				return domain.StepResult{}, fmt.Errorf("clone step has no reviewed repository")
@@ -174,15 +184,34 @@ func importMessage(done domain.ImportScan, job domain.ImportJob) string {
 	return strings.Join(parts, " · ")
 }
 
-// sourceContents reads a file the plan restores from the dotfiles source,
-// refusing one that changed since it was reviewed.
-func sourceContents(s domain.FileSource) ([]byte, error) {
-	f, err := (files.Manager{Roots: []string{s.Root}}).Inspect(s.Path)
-	if err != nil {
-		return nil, err
+// applyDotfile lets chezmoi write one reviewed target. A file it replaces is
+// backed up first, and a target that changed since the review is refused,
+// since chezmoi itself overwrites without asking.
+func applyDotfile(ctx context.Context, h domain.Host, s domain.Step, dir string, m files.Manager, r command.Runner) (domain.StepResult, error) {
+	result := domain.StepResult{ID: s.ID}
+	change := s.File
+	if change == nil || s.Command == nil {
+		return result, fmt.Errorf("dotfile step has no reviewed change")
 	}
-	if !f.Exists || f.SHA256 != s.SHA256 {
-		return nil, fmt.Errorf("your dotfiles changed since preview: %s", s.Path)
+	current, err := m.Inspect(change.Path)
+	switch {
+	case files.IsRedirect(err):
+		return result, fmt.Errorf("a link is in the way of %s; review it and run setup again", change.Path)
+	case err != nil:
+		return result, err
+	case current.Exists != change.BeforeExists || current.Exists && current.SHA256 != change.BeforeSHA256:
+		return result, fmt.Errorf("file changed since preview: %s", change.Path)
+	case current.Exists && change.Decision != domain.Replace:
+		return result, fmt.Errorf("replacement was not approved")
+	case current.Exists:
+		if result.BackupPath, err = m.Backup(ctx, change.Path, change.BeforeSHA256, dir); err != nil {
+			return result, err
+		}
 	}
-	return f.Contents, nil
+	if err = m.EnsureParent(change.Path); err != nil {
+		return result, err
+	}
+	cmd := *s.Command
+	cmd.Path = tool(h, "chezmoi")
+	return result, r.Run(ctx, cmd, io.Discard)
 }
