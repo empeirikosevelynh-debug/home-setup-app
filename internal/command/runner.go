@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"golden-gate-setup/internal/domain"
 	"io"
+	"strings"
 	"time"
 )
 
@@ -63,6 +64,14 @@ func (r ProcessRunner) Run(ctx context.Context, c domain.Command, out io.Writer)
 		return fmt.Errorf("%s failed: %w", c.Path, err)
 	}
 	return nil
+}
+
+// Report shows a progress line for work done without a command, cleaned
+// like command output.
+func (r ProcessRunner) Report(line string) {
+	if s := sanitize(line); r.Diagnostic != nil && strings.TrimSpace(s) != "" {
+		r.Diagnostic(s)
+	}
 }
 func ExitCode(err error) int {
 	var e interface{ ExitCode() int }

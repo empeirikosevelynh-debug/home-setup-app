@@ -22,6 +22,20 @@
 
 **Partial recovery folder:** export refuses overwrite. Inspect/archive the reported partial folder and retry a freshly accepted plan, preserving useful exports first.
 
+**"Setup cannot read" a previous home folder:** macOS privacy protection keeps your terminal out of other drives and some folders until you allow it. In System Settings → Privacy & Security, turn on Files and Folders → Removable Volumes or Network Volumes for your terminal app, or Full Disk Access, then inspect again. On a drive that keeps ownership, check the folder's permissions with Finder's Get Info.
+
+**Imported conflicts:** where a file here differs from the previous Mac's version, yours is kept and theirs is saved in `~/Imported conflicts/<date>/<folder>/`, numbered like `notes (2).txt` when several versions exist. Setup never deletes these copies; compare them and delete what you don't need. Running the import again, on any day, skips copies already saved. If setup was force-quit while copying, a file named `.golden-import-…` can be left in the folder it was copying to; it is safe to delete.
+
+**Not enough space to import:** the plan counts the new files plus the differing files it may save aside. Free up space or choose fewer folders, then inspect again.
+
+**iCloud-only files:** files that were only in iCloud on the previous Mac are placeholders on its disk, so they are not copied. Sign in to iCloud here and turn on iCloud Drive, with Desktop & Documents Folders if you used them.
+
+**What an import copies:** contents, permissions (without setuid, setgid or sticky bits), modification times and extended attributes such as Finder tags. Access control lists, file flags such as hidden or locked, and hard links are not kept: hard-linked files become separate copies. A bundle that already exists here with other contents, such as a Photos library or an app, is saved aside whole instead of merged.
+
+**Dotfiles repository:** "chezmoi's source folder already holds other dotfiles" means `~/.local/share/chezmoi` (or your configured source) is another repository or a local source; setup never replaces it. Move it aside or clear the repository choice. A private repository needs `gh auth login` first, an HTTPS token when Git asks, or an SSH key. When the review can't show a file's contents (an encrypted file, a modify script, or a template that runs commands or reads a password manager), setup keeps yours unless you approve, backs it up before chezmoi writes, and recognises it afterwards from chezmoi's own record. If chezmoi stops on a passphrase or template error, fix it and run setup again; files already applied are skipped. Scripts and removals are never run by setup: review them, then use `chezmoi apply --include=scripts` or `chezmoi apply`.
+
+**Imported dotfiles in chezmoi:** files you add join chezmoi's source without a commit. Review them with `chezmoi git status` before committing; a public repository makes them public. Setup never offers keys, tokens, caches, histories, binaries or files over 256 KiB.
+
 **Plain-input failure:** each answer needs a newline. Installation needs an interactive terminal; buffered pipes cannot transfer ownership for password prompts. Plain prompts do not by themselves prove VoiceOver usability.
 
 ## Windows preview

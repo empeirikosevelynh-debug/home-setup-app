@@ -8,6 +8,19 @@ type Options struct {
 	Workspaces                                                    []Workspace
 	ConfigureGit, AdoptChezmoi, CaptureInventory, PrepareRecovery bool
 	FileChoices                                                   map[string]FileDecision
+	// Bringing over a previous Mac. Empty values are left out of the JSON,
+	// so plans that do not use them keep their IDs.
+	PreviousBrewfile string   `json:",omitempty"`
+	PreviousPackages []string `json:",omitempty"`
+	// ImportFrom is a previous home folder; ImportFolders are names directly
+	// inside it, or "." for the files at its top.
+	ImportFrom    string   `json:",omitempty"`
+	ImportFolders []string `json:",omitempty"`
+	// DotfilesRepo is a chezmoi dotfiles repository: a GitHub user,
+	// user/repo or a Git URL.
+	DotfilesRepo string `json:",omitempty"`
+	// ChezmoiAdd holds imported dotfiles chosen for adding to chezmoi.
+	ChezmoiAdd []string `json:",omitempty"`
 }
 type Workspace struct {
 	Language, Path, Module, EntryPoint string
@@ -28,6 +41,68 @@ type Host struct {
 	// inspection data, and the plan IDs derived from it, are unchanged.
 	ChocoPath, ChocoVersion, AppData string `json:",omitempty"`
 	Elevated                         bool   `json:",omitempty"`
+	// Read only when a previous Mac's app list is chosen.
+	Taps, PreviousEntries, PreviousOther []string `json:",omitempty"`
+	// Read only when a previous home folder is chosen. ConflictDates names
+	// the dated folders earlier imports saved conflicts in. Free space changes
+	// all the time, so it stays out of the inspection fingerprint.
+	Import         []ImportScan `json:",omitempty"`
+	ImportProblems []string     `json:",omitempty"`
+	ConflictDates  []string     `json:",omitempty"`
+	FreeBytes      int64        `json:"-"`
+	// Read only when a dotfiles repository is chosen. DotfilesState is
+	// missing (not cloned yet), waiting (cloned, chezmoi not installed),
+	// cloned, or other (chezmoi's source holds other dotfiles, from
+	// DotfilesOrigin). chezmoi applies Dotfiles after review;
+	// DotfilesManual are left to the user.
+	DotfilesState    string    `json:",omitempty"`
+	DotfilesOrigin   string    `json:",omitempty"`
+	Dotfiles         []Dotfile `json:",omitempty"`
+	DotfilesManual   []string  `json:",omitempty"`
+	DotfilesScripts  bool      `json:",omitempty"`
+	DotfilesRemovals bool      `json:",omitempty"`
+	DotfilesProblem  string    `json:",omitempty"`
+	// ChezmoiIncoming means the import brings a previous chezmoi source.
+	// ChezmoiCandidates are imported dotfiles that can be added to chezmoi.
+	ChezmoiIncoming   bool     `json:",omitempty"`
+	ChezmoiCandidates []string `json:",omitempty"`
+}
+
+// Dotfile is a file or link chezmoi manages. Kind is file, template,
+// encrypted, link or modify. SHA256 covers the contents chezmoi will write
+// (a link's target), when they can be known before applying; Present means
+// the target already has them. Create files are only written where nothing
+// is, and Interactive ones may ask for a passphrase.
+type Dotfile struct {
+	Target                       string
+	Kind                         string
+	SHA256                       string `json:",omitempty"`
+	Create, Interactive, Present bool   `json:",omitempty"`
+	Contents                     []byte `json:"-"`
+}
+
+// ImportJob copies one folder of a previous home folder into this home.
+// Existing files are never replaced: a different version is saved under
+// Conflicts instead.
+type ImportJob struct {
+	Source, Destination, Conflicts string
+	// TopFilesOnly copies only the files directly inside Source.
+	TopFilesOnly bool `json:",omitempty"`
+	// Exclude holds destination paths that another step restores.
+	Exclude []string `json:",omitempty"`
+	// Saved holds earlier conflicts folders: a copy there counts as saved.
+	Saved []string `json:",omitempty"`
+}
+
+// ImportScan counts what importing a folder would do, or did.
+// Aside counts files whose version here differs but whose source copy is
+// already saved in a conflicts folder.
+type ImportScan struct {
+	Folder                                 string
+	Copy, Same, Differ, CloudOnly, Special int
+	Aside                                  int `json:",omitempty"`
+	CopyBytes, DifferBytes                 int64
+	Digest                                 string `json:",omitempty"`
 }
 type InstalledPackage struct {
 	Version   string
@@ -41,7 +116,10 @@ type FileState struct {
 	Path, SHA256    string
 	Mode            fs.FileMode
 	Exists, Symlink bool
-	Contents        []byte `json:"-"`
+	// Imported is a file the chosen folders bring: the plan is made
+	// against it, since the import comes first.
+	Imported bool   `json:",omitempty"`
+	Contents []byte `json:"-"`
 }
 type Package struct{ Kind, Token, MinVersion string }
 type Command struct {
@@ -74,6 +152,7 @@ type Step struct {
 	Package         *Package    `json:",omitempty"`
 	Command         *Command    `json:",omitempty"`
 	File            *FileChange `json:",omitempty"`
+	Import          *ImportJob  `json:",omitempty"`
 	Check           Check
 }
 type Plan struct {
@@ -86,6 +165,8 @@ type Plan struct {
 	Options       Options
 	Steps         []Step
 	ManualTasks   []ManualTask
+	// Later says what a second review plans once this plan is applied.
+	Later string `json:",omitempty"`
 }
 type ManualTask struct {
 	ID, Title, Instructions, URL string

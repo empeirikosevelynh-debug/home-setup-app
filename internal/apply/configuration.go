@@ -8,6 +8,7 @@ import (
 	"golden-gate-setup/internal/domain"
 	"golden-gate-setup/internal/plan"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -23,6 +24,21 @@ func SelectedFiles(h domain.Host, p domain.Plan) []string {
 		}
 	}
 	return result
+}
+
+// adopted lists what the chezmoi step adds: setup's chosen configuration,
+// when adoption is on, and the imported dotfiles chosen for chezmoi.
+func adopted(h domain.Host, p domain.Plan, s domain.Step) []string {
+	var chosen []string
+	if p.Options.AdoptChezmoi {
+		chosen = SelectedFiles(h, p)
+	}
+	for _, path := range strings.Split(s.Check.Expected, "\n") {
+		if path != "" && !slices.Contains(chosen, path) {
+			chosen = append(chosen, path)
+		}
+	}
+	return chosen
 }
 func ConfigurationHandlers(r command.Runner) map[string]Handler {
 	action := func(f func(context.Context, domain.Host, domain.Plan, string) error) func(context.Context, domain.Host, domain.Plan, domain.Step, string) (domain.StepResult, error) {
@@ -65,17 +81,19 @@ func ConfigurationHandlers(r command.Runner) map[string]Handler {
 		}), Verify: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (bool, error) {
 			return plan.PluginsSatisfied(h, p.Options.Plugins), nil
 		}},
-		"chezmoi": {Apply: action(func(c context.Context, h domain.Host, p domain.Plan, d string) error {
-			return AdoptChezmoi(c, h, SelectedFiles(h, p), r)
-		}), Verify: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (bool, error) {
-			chosen := SelectedFiles(h, p)
+		"chezmoi": {Apply: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (domain.StepResult, error) {
+			return action(func(c context.Context, h domain.Host, p domain.Plan, d string) error {
+				return AdoptChezmoi(c, h, adopted(h, p, s), r)
+			})(c, h, p, s, d)
+		}, Verify: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (bool, error) {
+			chosen := adopted(h, p, s)
 			if len(chosen) == 0 {
 				return true, nil
 			}
 			if h.Tools["chezmoi"] == "" {
 				return false, nil
 			}
-			cfg, cleanup, e := chezmoiConfig(c, h)
+			cfg, cleanup, e := chezmoiConfig(c, h, r)
 			if e != nil {
 				return false, e
 			}

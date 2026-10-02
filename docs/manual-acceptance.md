@@ -11,6 +11,7 @@ All items below remain unperformed for release candidate 0.1.0-rc.1. Temporary-h
 - [ ] Applite/Cork: shared path and registrations after installing through either client; native export/import retains taps and preserves existing app channels.
 - [ ] Curated Brewfile review and remote chezmoi commit/push.
 - [ ] Encrypted Time Machine backup and separate-folder retrieval; Migration Assistant in a disposable recovery environment.
+- [ ] Bring over a previous Mac into a fresh account: import an old home folder from an external drive (privacy prompt, progress, conflicts folder, iCloud-only files), clone and apply a real dotfiles repository with templates, age-encrypted files and a Brewfile (private repository sign-in, template answers, passphrase), add imported dotfiles to chezmoi, reinstall from a previous app list, and confirm that a second run changes nothing.
 - [ ] Kopia permissions/repository/password/policy, actual snapshot/errors, separate-folder restore.
 - [ ] VoiceOver/plain prompts: choices, validation, long text, foreground handoff.
 - [ ] Both themes/supported sizes in Warp and another terminal, including key protocols and zoom.

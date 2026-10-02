@@ -62,6 +62,7 @@ type model struct {
 	err                   error
 	conflicts             []domain.FileChange
 	replacements          []bool
+	chezmoiChoice         []string
 	resume                domain.Session
 	useResume             bool
 	events                chan tea.Msg
@@ -73,6 +74,9 @@ func cloneOptions(o domain.Options) domain.Options {
 	o.Plugins = append([]string(nil), o.Plugins...)
 	o.Languages = append([]string(nil), o.Languages...)
 	o.Workspaces = append([]domain.Workspace(nil), o.Workspaces...)
+	o.PreviousPackages = append([]string(nil), o.PreviousPackages...)
+	o.ImportFolders = append([]string(nil), o.ImportFolders...)
+	o.ChezmoiAdd = append([]string(nil), o.ChezmoiAdd...)
 	m := map[string]domain.FileDecision{}
 	for k, v := range o.FileChoices {
 		m[k] = v
@@ -88,7 +92,19 @@ func newModel(ctx context.Context, s Services) *model {
 	o := plan.DefaultOptionsFor(goos)
 	return &model{ctx: ctx, services: s, options: o, draft: cloneOptions(o), dark: true, stage: "welcome"}
 }
-func (m *model) commitDraft() { m.options = cloneOptions(m.draft) }
+func (m *model) commitDraft() { m.options = settled(cloneOptions(m.draft)) }
+
+// settled drops choices whose source was cleared after they were made: a
+// hidden list keeps its last selection.
+func settled(o domain.Options) domain.Options {
+	if o.ImportFrom == "" {
+		o.ImportFolders = nil
+	}
+	if o.PreviousBrewfile == "" {
+		o.PreviousPackages = nil
+	}
+	return o
+}
 func (m *model) cancelDraft() {
 	m.draft = cloneOptions(m.options)
 	m.form = nil
@@ -167,15 +183,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.reject(v.err)
 		}
 		m.host, m.preview = v.host, v.plan
-		m.conflicts = conflictChanges(m.services, m.host, m.options)
-		m.replacements = make([]bool, len(m.conflicts))
-		if len(m.conflicts) > 0 {
-			m.conflictIndex = 0
-			m.showConflict()
-			return m, nil
+		if len(m.host.ChezmoiCandidates) > 0 {
+			m.stage = "chezmoi"
+			m.chezmoiChoice = nil
+			for _, path := range m.host.ChezmoiCandidates {
+				if plan.Has(m.options.ChezmoiAdd, path) {
+					m.chezmoiChoice = append(m.chezmoiChoice, path)
+				}
+			}
+			var list *huh.MultiSelect[string]
+			m.form, list = chezmoiForm(m.host, &m.chezmoiChoice, func() bool { return m.dark })
+			m.lists = []*huh.MultiSelect[string]{list}
+			m.resizeForm()
+			return m, m.form.Init()
 		}
-		m.showPreview()
-		return m, nil
+		return m.reviewFiles()
 	case domain.Event:
 		m.lines += v.Status + ": " + v.Text + "\n"
 		if len(m.lines) > 65536 {
@@ -194,6 +216,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lines = ReportText(v.report)
 		if v.err != nil {
 			m.lines += "\n" + v.err.Error()
+		}
+		if m.continues() {
+			m.lines += "\nNext: " + m.preview.Later + " Press r to review it now.\n"
 		}
 		if m.ctx.Err() != nil {
 			return m, tea.Quit
@@ -252,8 +277,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.stage == "done" {
-			if v.String() == "q" || v.String() == "enter" {
+			switch {
+			case v.String() == "q" || v.String() == "enter":
 				return m, tea.Quit
+			case v.String() == "r" && m.continues():
+				m.report = domain.Report{}
+				if found := repoBrewfiles(plan.DotfilesSource(m.host)); m.options.DotfilesRepo != "" && m.options.PreviousBrewfile == "" && len(found) > 0 {
+					m.offerBrewfile(found[0])
+					return m, m.form.Init()
+				}
+				m.stage = "inspecting"
+				return m, m.inspectCmd()
 			}
 			return m, nil
 		}
@@ -294,7 +328,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	if m.form != nil && (m.stage == "welcome" || m.stage == "select" || m.stage == "files") {
+	if m.form != nil && (m.stage == "welcome" || m.stage == "select" || m.stage == "files" || m.stage == "chezmoi" || m.stage == "brewfile") {
 		next, cmd := m.form.Update(msg)
 		if f, ok := next.(*huh.Form); ok {
 			m.form = f
@@ -313,6 +347,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.form = nil
 				m.notice = ""
 				return m, m.inspectCmd()
+			case "brewfile":
+				m.options = settled(m.options)
+				m.form = nil
+				m.stage = "inspecting"
+				return m, m.inspectCmd()
+			case "chezmoi":
+				m.options.ChezmoiAdd = append([]string(nil), m.chezmoiChoice...)
+				m.form = nil
+				return m.reviewFiles()
 			case "files":
 				for i, c := range m.conflicts {
 					if m.replacements[i] {
@@ -337,6 +380,44 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 func (m *model) readEvent() tea.Cmd { return func() tea.Msg { return <-m.events } }
+
+// offerBrewfile asks, once the dotfiles repository is cloned, whether to
+// reinstall from the Brewfile it keeps.
+func (m *model) offerBrewfile(path string) {
+	m.stage = "brewfile"
+	m.options.PreviousBrewfile, m.options.PreviousPackages = path, nil
+	groups, list := previousForm(&m.options)
+	entries, _ := previousEntries(path)
+	note := huh.NewNote().Title("Your dotfiles include a Brewfile").Description(fmt.Sprintf("%s lists %d apps and tools. Choose which to reinstall, or clear the path to skip.", path, len(entries)))
+	m.form = huh.NewForm(append([]*huh.Group{huh.NewGroup(note)}, groups...)...).WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return formTheme(m.dark) }))
+	m.lists = []*huh.MultiSelect[string]{list}
+	m.resizeForm()
+}
+
+// reviewFiles plans with the current choices, then asks about each file a
+// step would replace before showing the plan.
+func (m *model) reviewFiles() (tea.Model, tea.Cmd) {
+	p, e := m.services.Build(m.host, m.options)
+	if e != nil {
+		return m.reject(e)
+	}
+	m.preview = p
+	m.conflicts = conflictChanges(m.services, m.host, m.options)
+	m.replacements = make([]bool, len(m.conflicts))
+	if len(m.conflicts) > 0 {
+		m.conflictIndex = 0
+		m.showConflict()
+		return m, nil
+	}
+	m.showPreview()
+	return m, nil
+}
+
+// continues reports whether the applied plan left the rest of setup for a
+// second review.
+func (m *model) continues() bool {
+	return m.err == nil && m.report.Status == "complete" && m.preview.Later != ""
+}
 
 // reject returns to the choices after an inspection or plan fails, keeping
 // them so a mistyped path or module can be corrected instead of starting over.
@@ -426,6 +507,9 @@ func PlanText(p domain.Plan) string {
 	for i, s := range p.Steps {
 		fmt.Fprintf(&b, "%d. %s\n", i+1, s.Label)
 	}
+	if p.Later != "" {
+		fmt.Fprintln(&b, "Then: "+p.Later)
+	}
 	fmt.Fprintln(&b, "\nManual follow-up:")
 	for _, s := range p.ManualTasks {
 		fmt.Fprintf(&b, "• %s — %s\n", s.Title, s.Instructions)
@@ -455,7 +539,7 @@ func (m *model) showConflict() {
 	m.form = nil
 	m.scroll = 0
 	c := m.conflicts[m.conflictIndex]
-	m.lines = c.Path + "\n" + DiffText(m.host.Files[c.Path].Contents, c.Desired)
+	m.lines = c.Path + "\n" + ChangeText(m.host, c)
 }
 
 func restoredOptions(o domain.Options) domain.Options {

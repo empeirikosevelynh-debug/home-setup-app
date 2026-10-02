@@ -66,6 +66,10 @@ func (e *Executor) Execute(ctx context.Context, p domain.Plan, emit func(domain.
 		return report, er
 	}
 	dir := filepath.Join(e.Store.Dir, p.ID+".backups")
+	// Later inspections confirm steps. They leave out the folder scans, which
+	// only planning needs: an import step confirms itself by reading files.
+	confirm := p.Options
+	confirm.ImportFolders = nil
 	done := map[string]bool{}
 	save := func(r domain.StepResult) error {
 		report.Steps = append(report.Steps, r)
@@ -171,7 +175,7 @@ func (e *Executor) Execute(ctx context.Context, p domain.Plan, emit func(domain.
 				report.ManualTasks = append(report.ManualTasks, domain.ManualTask{ID: "deferred:" + step.ID, Title: title, Instructions: result.Message, Required: true})
 			}
 			if result.Status != "preserved" {
-				host, er = e.Inspect(ctx, p.Options)
+				host, er = e.Inspect(ctx, confirm)
 				if er != nil {
 					return fail(step, result, er)
 				}

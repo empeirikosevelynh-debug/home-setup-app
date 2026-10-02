@@ -11,6 +11,9 @@
 - Steps that are already satisfied no longer re-inspect the Mac, a vendor app found during apply is reported once, and session saves no longer accumulate backups.
 - Build outputs and local machine files are no longer tracked.
 - Windows 11 preview: inspection, planning and installation with Chocolatey for the core tools, Warp, Zed, GitHub Desktop, KopiaUI, Go and Nim, with Starship, Zed, lazygit, Git and chezmoi configuration and Windows follow-up tasks. macOS plans are unchanged.
+- Bring over a previous Mac without Migration Assistant: copy chosen folders from the previous home folder, never replacing or deleting anything (differing files are saved in a dated `~/Imported conflicts` folder); clone a chezmoi dotfiles repository and restore its plain files through the file review; and reinstall chosen entries from the previous Mac's app list. When the rest of setup depends on what was brought over, the summary offers a second review.
+- Dotfiles go through chezmoi: the review lists every file a dotfiles repository would change, templates and encrypted files included, and chezmoi applies the approved ones after setup backs up any file it replaces. Importing dotfolders no longer needs a second review, imported dotfiles can be added to chezmoi, and a Brewfile kept in the dotfiles or the old home folder is offered as the app list.
+- Clearing a path in the wizard also drops the choices made from it.
 - The repository opens in Zed with project settings, tasks and debug setups. The installer's workspace templates are stored outside `.zed/` folders, so Zed no longer loads them as live configuration.
 
 ## 0.1.0-rc.1 — 2026-09-30

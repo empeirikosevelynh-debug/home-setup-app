@@ -4,6 +4,8 @@ package sandbox
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"golden-gate-setup/internal/command"
@@ -22,11 +24,17 @@ import (
 )
 
 type Sandbox struct {
-	Home        string
-	FailToken   string
+	Home      string
+	FailToken string
+	// Dotfiles is the repository chezmoi init clones: source paths and
+	// contents.
+	Dotfiles    map[string]string
+	origin      string
+	written     map[string]string
 	mu          sync.Mutex
 	packages    map[string]domain.InstalledPackage
 	plugins     []string
+	taps        []string
 	managed     map[string]bool
 	sourceDirty bool
 	calls       []domain.Command
@@ -118,6 +126,12 @@ func (s *Sandbox) Run(ctx context.Context, c domain.Command, w io.Writer) error 
 		switch c.Args[0] {
 		case "--prefix":
 			io.WriteString(w, "/opt/homebrew\n")
+		case "tap":
+			if len(c.Args) == 1 {
+				io.WriteString(w, strings.Join(s.taps, "\n"))
+			} else if !plan.Has(s.taps, c.Args[1]) {
+				s.taps = append(s.taps, c.Args[1])
+			}
 		case "info":
 			formulae := []map[string]any{}
 			casks := []map[string]any{}
@@ -209,13 +223,75 @@ func (s *Sandbox) Run(ctx context.Context, c domain.Command, w io.Writer) error 
 		src := filepath.Join(s.Home, ".local/share/chezmoi")
 		switch c.Args[0] {
 		case "source-path":
-			io.WriteString(w, src+"\n")
+			targets := after(c.Args, "--")
+			if len(targets) == 0 {
+				io.WriteString(w, src+"\n")
+			}
+			sources := s.sources(src)
+			for _, target := range targets {
+				io.WriteString(w, sources[target]+"\n")
+			}
 		case "init":
+			repo := after(c.Args, "--")
+			if len(repo) == 1 {
+				for rel, contents := range s.Dotfiles {
+					path := filepath.Join(src, rel)
+					os.MkdirAll(filepath.Dir(path), 0700)
+					if e := os.WriteFile(path, []byte(contents), 0600); e != nil {
+						return e
+					}
+				}
+				s.origin = repo[0]
+			}
 			return os.MkdirAll(filepath.Join(src, ".git"), 0700)
+		case "dump-config":
+			io.WriteString(w, `{"data":{"email":"you@example.test"}}`)
+		case "cat":
+			sources := s.sources(src)
+			for _, target := range after(c.Args, "--") {
+				data, e := os.ReadFile(sources[target])
+				if e != nil {
+					return e
+				}
+				w.Write(data)
+			}
+		case "state":
+			entries := map[string]map[string]string{}
+			for target, sum := range s.written {
+				entries[target] = map[string]string{"type": "file", "contentsSHA256": sum}
+			}
+			return json.NewEncoder(w).Encode(map[string]any{"entryState": entries})
+		case "apply":
+			sources := s.sources(src)
+			for _, target := range after(c.Args, "--") {
+				data, e := os.ReadFile(sources[target])
+				if e != nil {
+					return e
+				}
+				if strings.Contains(filepath.Base(sources[target]), "symlink_") {
+					if e = os.Symlink(strings.TrimSpace(string(data)), target); e != nil {
+						return e
+					}
+					continue
+				}
+				if e = os.WriteFile(target, data, 0600); e != nil {
+					return e
+				}
+				sum := sha256.Sum256(data)
+				if s.written == nil {
+					s.written = map[string]string{}
+				}
+				s.written[target] = hex.EncodeToString(sum[:])
+			}
 		case "managed":
 			var paths []string
 			for p := range s.managed {
 				paths = append(paths, p)
+			}
+			for target := range s.sources(src) {
+				if !s.managed[target] {
+					paths = append(paths, target)
+				}
 			}
 			sort.Strings(paths)
 			io.WriteString(w, strings.Join(paths, "\x00"))
@@ -223,6 +299,24 @@ func (s *Sandbox) Run(ctx context.Context, c domain.Command, w io.Writer) error 
 			path := c.Args[len(c.Args)-1]
 			s.managed[path] = true
 			s.sourceDirty = true
+			rel, e := filepath.Rel(s.Home, path)
+			if e != nil {
+				return e
+			}
+			var parts []string
+			for _, part := range strings.Split(rel, string(filepath.Separator)) {
+				if rest, ok := strings.CutPrefix(part, "."); ok {
+					part = "dot_" + rest
+				}
+				parts = append(parts, part)
+			}
+			data, e := os.ReadFile(path)
+			if e != nil {
+				return e
+			}
+			added := filepath.Join(append([]string{src}, parts...)...)
+			os.MkdirAll(filepath.Dir(added), 0700)
+			return os.WriteFile(added, data, 0600)
 		case "status":
 			if s.sourceDirty {
 				io.WriteString(w, " M chosen settings\n")
@@ -231,6 +325,13 @@ func (s *Sandbox) Run(ctx context.Context, c domain.Command, w io.Writer) error 
 			return fmt.Errorf("unexpected chezmoi call")
 		}
 	case strings.HasSuffix(c.Path, "/git") && len(c.Args) > 0 && c.Args[0] == "-C":
+		if plan.Has(c.Args, "remote.origin.url") {
+			if s.origin == "" {
+				return exitStatus(1)
+			}
+			io.WriteString(w, s.origin+"\n")
+			return nil
+		}
 		if s.sourceDirty {
 			io.WriteString(w, " M selected files\n")
 		}
@@ -260,6 +361,57 @@ func (s *Sandbox) Run(ctx context.Context, c domain.Command, w io.Writer) error 
 		return fmt.Errorf("fixture refuses unknown command %s", c.Path)
 	}
 	return nil
+}
+
+// exitStatus fails like a command that exited with this status.
+type exitStatus int
+
+func (e exitStatus) Error() string { return fmt.Sprintf("exit status %d", int(e)) }
+func (e exitStatus) ExitCode() int { return int(e) }
+
+// after returns the arguments that follow "--".
+func after(args []string, marker string) []string {
+	for i, a := range args {
+		if a == marker {
+			return args[i+1:]
+		}
+	}
+	return nil
+}
+
+// sources maps each target the cloned repository manages to its source
+// file, reading chezmoi's attributes from the names much as chezmoi does.
+func (s *Sandbox) sources(src string) map[string]string {
+	targets := map[string]string{}
+	filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || path == src {
+			return nil
+		}
+		if strings.HasPrefix(d.Name(), ".") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() || strings.HasPrefix(d.Name(), "run_") {
+			return nil
+		}
+		rel, _ := filepath.Rel(src, path)
+		var parts []string
+		for _, part := range strings.Split(rel, string(filepath.Separator)) {
+			part = strings.TrimSuffix(part, ".tmpl")
+			for _, prefix := range []string{"create_", "modify_", "symlink_", "encrypted_", "exact_", "private_", "readonly_", "empty_", "executable_"} {
+				part = strings.TrimPrefix(part, prefix)
+			}
+			if rest, ok := strings.CutPrefix(part, "dot_"); ok {
+				part = "." + rest
+			}
+			parts = append(parts, part)
+		}
+		targets[filepath.Join(append([]string{s.Home}, parts...)...)] = path
+		return nil
+	})
+	return targets
 }
 
 // fishEscape writes a value the way fish stores it in fish_variables.

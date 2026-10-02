@@ -20,12 +20,12 @@ In **App Migration → Export Apps…**, select desired apps and save the dated 
 
 ## After reinstalling
 
-1. Migrate an existing account with Setup Assistant/Migration Assistant before rebuilding it. [Apple recovery instructions](https://support.apple.com/en-us/102551).
-2. Open restored files and verify retrieval. Reconnect accounts, licenses, and backup credentials.
+1. Migrate an existing account with Setup Assistant/Migration Assistant before rebuilding it. [Apple recovery instructions](https://support.apple.com/en-us/102551). To start fresh instead, restore or connect the old home folder (an external drive, a share, a Kopia restore, or a mounted Time Machine backup you browse to) and let setup bring over chosen folders, your dotfiles repository and the previous app list; see [Bring over your previous Mac](../README.md#bring-over-your-previous-mac).
+2. Open restored files and verify retrieval. Reconnect accounts, licenses, and backup credentials. Compare anything setup saved in `~/Imported conflicts/`.
 3. Inspect setup first; saved choices require fresh approval and local replacement reviews.
 4. Confirm both clients' shared prefix. Restore needed taps; import only missing apps from Applite's native export. Keep existing vendor/App Store channels. Do not import the commented example Brewfile as a native app list.
-5. Review Homebrew records before reinstalling. `brew bundle` can upgrade by default; inventory is not a frozen environment. [Bundle behavior](https://docs.brew.sh/Brew-Bundle-and-Brewfile).
-6. Review chezmoi source/diff before restoring configuration. Local adoption alone creates no remote backup; review, commit, connect your chosen remote, and push separately.
+5. Review Homebrew records before reinstalling. `brew bundle` can upgrade by default; inventory is not a frozen environment. [Bundle behavior](https://docs.brew.sh/Brew-Bundle-and-Brewfile). Setup's previous app list installs only the entries you tick that are missing, and never upgrades.
+6. Review chezmoi source/diff before restoring configuration. Setup lists every file a chosen repository would change, templates and encrypted files included, and chezmoi applies the ones you approve; scripts and removals stay with you. Local adoption, including imported dotfiles you add, creates no remote backup; review, commit, connect your chosen remote, and push separately.
 7. Finish terminal/editor preferences, CLI/extensions, fonts, authentication, and actual project tasks.
 8. Reconnect and test Time Machine/Kopia, including another separate-folder restore.
 

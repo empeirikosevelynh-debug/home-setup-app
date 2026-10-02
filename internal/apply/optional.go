@@ -8,6 +8,8 @@ import (
 	"golden-gate-setup/internal/command"
 	"golden-gate-setup/internal/domain"
 	"golden-gate-setup/internal/files"
+	"golden-gate-setup/internal/plan"
+	"io"
 	"path/filepath"
 	"strings"
 )
@@ -41,6 +43,47 @@ func OptionalHandlers(r command.Runner, m files.Manager) map[string]Handler {
 		}, Verify: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (bool, error) {
 			f, e := m.Inspect(s.Check.Target)
 			return e == nil && f.Exists && f.SHA256 == s.Check.Expected, e
+		}},
+		"tap": {Apply: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (domain.StepResult, error) {
+			return domain.StepResult{ID: s.ID}, r.Run(c, domain.Command{Path: h.BrewPath, Stream: true, Args: []string{"tap", s.Check.Target}, Env: []string{"HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1"}}, io.Discard)
+		}, Verify: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (bool, error) {
+			return plan.Has(h.Taps, s.Check.Target), nil
+		}},
+		"import": {Apply: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (domain.StepResult, error) {
+			if s.Import == nil {
+				return domain.StepResult{}, fmt.Errorf("import step has no reviewed folder")
+			}
+			var report func(string)
+			if reporter, ok := r.(interface{ Report(string) }); ok {
+				report = reporter.Report
+			}
+			done, e := m.Import(c, *s.Import, report)
+			return domain.StepResult{ID: s.ID, Message: importMessage(done, *s.Import)}, e
+		}, Verify: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (bool, error) {
+			if s.Import == nil {
+				return false, fmt.Errorf("import step has no reviewed folder")
+			}
+			return m.Imported(c, *s.Import)
+		}},
+		"dotfile": {Apply: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (domain.StepResult, error) {
+			return applyDotfile(c, h, s, d, m, r)
+		}, Verify: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (bool, error) {
+			for _, dotfile := range h.Dotfiles {
+				if dotfile.Target == s.Check.Target {
+					return dotfile.Present, nil
+				}
+			}
+			return false, nil
+		}},
+		"chezmoi-init": {Apply: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (domain.StepResult, error) {
+			if s.Command == nil {
+				return domain.StepResult{}, fmt.Errorf("clone step has no reviewed repository")
+			}
+			cmd := *s.Command
+			cmd.Path, cmd.Interactive = tool(h, "chezmoi"), true
+			return domain.StepResult{ID: s.ID}, r.Run(c, cmd, io.Discard)
+		}, Verify: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (bool, error) {
+			return h.DotfilesState == "cloned" || h.DotfilesState == "waiting", nil
 		}},
 		"recovery": {Apply: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (domain.StepResult, error) {
 			dir := recoveryDir(h, p)
@@ -99,19 +142,9 @@ func inventorySatisfied(m files.Manager, h domain.Host, path string) (bool, erro
 		return false, e
 	}
 	found := map[string]bool{}
-	for _, line := range strings.Split(string(f.Contents), "\n") {
-		line = strings.TrimSpace(line)
-		for _, kind := range []string{"brew", "cask"} {
-			prefix := kind + " \""
-			if strings.HasPrefix(line, prefix) {
-				token := strings.Split(strings.TrimPrefix(line, prefix), "\"")[0]
-				key := kind
-				if kind == "brew" {
-					key = "formula"
-				}
-				found[key+":"+token] = true
-			}
-		}
+	entries, _ := plan.ParseBrewfile(f.Contents)
+	for _, key := range entries {
+		found[key] = true
 	}
 	for key, v := range h.Packages {
 		if strings.HasPrefix(key, "formula:") && v.OnRequest != nil && !*v.OnRequest {
@@ -122,4 +155,63 @@ func inventorySatisfied(m files.Manager, h domain.Host, path string) (bool, erro
 		}
 	}
 	return len(f.Contents) > 0, nil
+}
+
+// importMessage sums up what an import did.
+func importMessage(done domain.ImportScan, job domain.ImportJob) string {
+	count := func(n int, noun string) string {
+		if n == 1 {
+			return "1 " + noun
+		}
+		return fmt.Sprintf("%d %ss", n, noun)
+	}
+	parts := []string{fmt.Sprintf("Copied %s (%s)", count(done.Copy, "new file"), plan.SizeText(done.CopyBytes))}
+	if done.Same > 0 {
+		parts = append(parts, fmt.Sprintf("%d already here", done.Same))
+	}
+	if done.Differ > 0 {
+		parts = append(parts, count(done.Differ, "differing file")+" saved in "+job.Conflicts)
+	}
+	if done.Aside > 0 {
+		parts = append(parts, fmt.Sprintf("%d saved earlier", done.Aside))
+	}
+	if done.CloudOnly > 0 {
+		parts = append(parts, count(done.CloudOnly, "iCloud-only file")+" not copied")
+	}
+	if done.Special > 0 {
+		parts = append(parts, count(done.Special, "special file")+" skipped")
+	}
+	return strings.Join(parts, " · ")
+}
+
+// applyDotfile lets chezmoi write one reviewed target. A file it replaces is
+// backed up first, and a target that changed since the review is refused,
+// since chezmoi itself overwrites without asking.
+func applyDotfile(ctx context.Context, h domain.Host, s domain.Step, dir string, m files.Manager, r command.Runner) (domain.StepResult, error) {
+	result := domain.StepResult{ID: s.ID}
+	change := s.File
+	if change == nil || s.Command == nil {
+		return result, fmt.Errorf("dotfile step has no reviewed change")
+	}
+	current, err := m.Inspect(change.Path)
+	switch {
+	case files.IsRedirect(err):
+		return result, fmt.Errorf("a link is in the way of %s; review it and run setup again", change.Path)
+	case err != nil:
+		return result, err
+	case current.Exists != change.BeforeExists || current.Exists && current.SHA256 != change.BeforeSHA256:
+		return result, fmt.Errorf("file changed since preview: %s", change.Path)
+	case current.Exists && change.Decision != domain.Replace:
+		return result, fmt.Errorf("replacement was not approved")
+	case current.Exists:
+		if result.BackupPath, err = m.Backup(ctx, change.Path, change.BeforeSHA256, dir); err != nil {
+			return result, err
+		}
+	}
+	if err = m.EnsureParent(change.Path); err != nil {
+		return result, err
+	}
+	cmd := *s.Command
+	cmd.Path = tool(h, "chezmoi")
+	return result, r.Run(ctx, cmd, io.Discard)
 }

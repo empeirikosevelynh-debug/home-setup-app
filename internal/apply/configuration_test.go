@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -248,5 +249,19 @@ func TestNimServerVersionAndGlobalScope(t *testing.T) {
 	})
 	if e := InstallLanguageTools(context.Background(), h, []string{"nim"}, r); e != nil || !called {
 		t.Fatal("Nim install missing", e)
+	}
+}
+
+func TestAdoptedFiles(t *testing.T) {
+	h := testutil.FreshHost(t.TempDir())
+	fish := h.Home + "/.config/fish/config.fish"
+	p := domain.Plan{Options: domain.Options{AdoptChezmoi: true}, Steps: []domain.Step{{Kind: "file", File: &domain.FileChange{Path: fish}}}}
+	step := domain.Step{Kind: "chezmoi", Check: domain.Check{Kind: "chezmoi", Expected: h.Home + "/.zshrc\n" + fish}}
+	if got := adopted(h, p, step); !reflect.DeepEqual(got, []string{fish, h.Home + "/.zshrc"}) {
+		t.Fatal(got)
+	}
+	p.Options.AdoptChezmoi = false
+	if got := adopted(h, p, step); !reflect.DeepEqual(got, []string{h.Home + "/.zshrc", fish}) {
+		t.Fatal("only the chosen imported dotfiles are added without adoption:", got)
 	}
 }

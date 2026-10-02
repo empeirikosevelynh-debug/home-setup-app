@@ -11,9 +11,9 @@ Status: implemented release candidate 0.1.0-rc.1. Automated evidence is recorded
 | 3. Configure Starship | Preview and install the TOML; verify availability | Confirm prompt in actual terminal sessions |
 | 4. Connect Warp, Zed, and Git | Select Warp/Zed; preview user settings and Git keys; optional lazygit configuration | Warp preferences; Zed CLI/extensions; authentication; editor and shortcut checks |
 | 5. Choose Fish plugins | Install selected Fisher/plugins in the correct order; record the chosen manifest | Extra plugins are individual choices; verify terminal-specific typing and bindings |
-| 6. Manage configuration with chezmoi | Inspect/init an appropriate local source; adopt only selected files; query status without storing private file diffs | Existing source conflicts; GitHub sign-in; remote selection, commit, push, and reviewed restores |
-| 7. Manage apps with Applite and Cork | Install selected available casks; inspect shared registrations; generate a dated full inventory | Cork distribution/license; Applite shared-path setting; native export/import; app-specific adoption decisions |
-| 8. Back up and recover | Prepare recovery folder; optionally install KopiaUI; preview conservative exclusions | Time Machine disk/encryption; migration before rebuild; Full Disk Access; repository/schedule; test restores |
+| 6. Manage configuration with chezmoi | Inspect/init an appropriate local source; adopt only selected files; query status without storing private file diffs; clone a chosen dotfiles repository, review every file chezmoi would change, and let chezmoi apply the approved ones after a backup, without storing their contents; offer imported dotfiles for adoption, never keys or tokens | Existing source conflicts; GitHub sign-in; passphrases; remote selection, commit, push; scripts and removals through `chezmoi apply` |
+| 7. Manage apps with Applite and Cork | Install selected available casks; inspect shared registrations; generate a dated full inventory; reinstall chosen missing entries from a previous Mac's inventory or a Brewfile in the dotfiles | Cork distribution/license; Applite shared-path setting; native export/import; app-specific adoption decisions; App Store and other inventory lines |
+| 8. Back up and recover | Prepare recovery folder; optionally install KopiaUI; preview conservative exclusions; copy chosen folders from a previous home folder without replacing or deleting anything | Time Machine disk/encryption; migration before rebuild; Full Disk Access; repository/schedule; test restores; comparing saved conflicts; iCloud-only files |
 | 9. Daily reference | Link the relevant maintenance instructions in the finish report | Later daily operations are outside a first-time installation run |
 | 10. Go, Crystal, and Nim workspaces | Install selected toolchains/servers; optionally create reviewed workspace files | Actual project names/entry points; extension installation; real project tests |
 | Check the setup | Check installed commands, package prefix, file syntax, and selected toolchain availability | Warp/Zed behavior, GitHub, shared GUI inventory refresh, backup retrieval |
@@ -39,5 +39,7 @@ Status: implemented release candidate 0.1.0-rc.1. Automated evidence is recorded
 - An existing chezmoi repository and its pending edits are inspected before importing live files.
 - A full or curated Brewfile survives native Applite export and inventory generation.
 - The commented example Brewfile and observed app checklist are never treated as unconditional native-import or installation manifests.
+- Importing from a previous home folder never replaces, merges into or deletes an existing file, folder bundle or link target; differing files are saved in a dated conflicts folder, and a repeated import saves nothing twice.
+- A chezmoi source holding other dotfiles is never replaced, and files a chosen dotfiles repository manages are not copied by the folder import.
 - A failed or canceled run leaves a truthful report and enough state to inspect and resume.
 - Previewing, testing, and developing the project do not apply the setup to the current Mac.

@@ -59,8 +59,10 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 		}
 		p.Steps = append(p.Steps, s)
 	}
+	handled := map[string]bool{}
 	pkg := func(kind, token, minimum string) {
 		key := kind + ":" + token
+		handled[key] = true
 		if installed, ok := h.Packages[key]; ok {
 			if minimum != "" && !AtLeastVersion(installed.Version, minimum) {
 				p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "update:" + key, Title: "Review the required update for " + token, Instructions: "Selected features require " + token + " " + minimum + " or later. Update it deliberately in Cork or Homebrew, then inspect again.", Required: true})
@@ -114,11 +116,30 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 			}
 		}
 	}
+	if err := addPrevious(&p, h, o, handled, pkg, add); err != nil {
+		return p, err
+	}
+	cloning, err := addClone(&p, h, o, add)
+	if err != nil {
+		return p, err
+	}
+	if cloning {
+		p.Later = "Restoring your dotfiles and the rest of setup are planned in a second review, once the repository is cloned."
+		p.ID, err = Fingerprint(p)
+		return p, err
+	}
+	if err := addImport(&p, h, o, add); err != nil {
+		return p, err
+	}
+	restored := addDotfiles(&p, h, o, add)
 	config := []configFile{{"fish/config.fish", filepath.Join(h.Home, ".config/fish/config.fish")}, {"starship.toml", filepath.Join(h.Home, ".config/starship.toml")}, {"zed/settings.example.json", filepath.Join(h.Home, ".config/zed/settings.json")}, {"lazygit/config.yml", filepath.Join(h.LazyGitDir, "config.yml")}}
 	if o.PrepareRecovery && Has(o.Apps, "kopiaui") {
 		config = append(config, configFile{"recovery/kopiaignore", filepath.Join(h.Home, ".kopiaignore")})
 	}
 	for _, c := range config {
+		if restored[c.path] {
+			continue
+		}
 		if err := addConfig(&p, h, o, c, add); err != nil {
 			return p, err
 		}
@@ -150,11 +171,15 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 		}
 	}
 	if o.ConfigureGit {
-		add(gitStep(h))
+		if restored[filepath.Join(h.Home, ".gitconfig")] || restored[filepath.Join(h.Home, ".config/git/config")] {
+			p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "git-dotfiles", Title: "Set Git's editor and viewer in your dotfiles", Instructions: "Your dotfiles repository manages Git's configuration, so setup leaves it as restored. To use Zed and delta, add these settings there: core.editor = zed --wait, core.pager = delta, interactive.diffFilter = delta --color-only, delta.navigate = true.", Required: false})
+		} else {
+			add(gitStep(h))
+		}
 	}
 	if len(o.Plugins) > 0 {
 		if PluginsSatisfied(h, o.Plugins) {
-		} else if h.FishPluginConflict || h.FishLegacy || h.Files[filepath.Join(h.Home, ".config/fish/fish_plugins")].Exists {
+		} else if h.FishPluginConflict || h.FishLegacy || h.Files[filepath.Join(h.Home, ".config/fish/fish_plugins")].Exists || restored[filepath.Join(h.Home, ".config/fish/fish_plugins")] {
 			p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "plugins-conflict", Title: "Preserve existing Fish plugin files", Instructions: "Review the selected plugins and existing functions before adding them. No existing plugin or function is removed.", Required: false})
 		} else {
 			add(domain.Step{ID: "plugins", Label: "Install selected Fish plugins", Kind: "plugins", Check: domain.Check{Kind: "plugins", Expected: strings.Join(o.Plugins, "\n")}})
@@ -163,8 +188,8 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 	if len(o.Languages) > 0 {
 		add(languageStep(o))
 	}
-	if o.AdoptChezmoi {
-		addChezmoi(&p, h, add)
+	if added := chezmoiAdds(h, o); o.AdoptChezmoi || len(added) > 0 {
+		addChezmoi(&p, h, added, add)
 	}
 	if o.CaptureInventory || o.PrepareRecovery {
 		add(domain.Step{ID: "recovery", Label: "Prepare dated recovery records", Kind: "recovery", Check: domain.Check{Kind: "recovery"}})
@@ -175,6 +200,42 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 		return p, err
 	}
 	return p, nil
+}
+
+// addPrevious plans the entries chosen from the previous Mac's app list:
+// taps first, then missing formulae and casks. Installed entries are left
+// as they are, and entries the catalog already handled are not repeated.
+func addPrevious(p *domain.Plan, h domain.Host, o domain.Options, handled map[string]bool, pkg func(kind, token, minimum string), add func(domain.Step)) error {
+	for _, key := range o.PreviousPackages {
+		if !Has(h.PreviousEntries, key) {
+			return fmt.Errorf("%s is not in the previous app list", key)
+		}
+	}
+	planned := func(id string) bool {
+		for _, s := range p.Steps {
+			if s.ID == id {
+				return true
+			}
+		}
+		return false
+	}
+	for _, key := range h.PreviousEntries {
+		if !Has(o.PreviousPackages, key) || handled[key] {
+			continue
+		}
+		kind, name, _ := strings.Cut(key, ":")
+		if kind == "tap" {
+			if !Has(h.Taps, name) && !planned("tap:"+name) {
+				add(domain.Step{ID: "tap:" + name, Label: "Tap " + name, Kind: "tap", Check: domain.Check{Kind: "tap", Target: name}})
+			}
+			continue
+		}
+		pkg(kind, name, "")
+	}
+	if o.PreviousBrewfile != "" && len(h.PreviousOther) > 0 {
+		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "previous-other", Title: "Reinstall the rest of your previous app list", Instructions: "These entries are not installed automatically; install the ones you still want yourself (App Store apps from the App Store): " + strings.Join(h.PreviousOther, "; "), Required: false})
+	}
+	return nil
 }
 
 type configFile struct{ asset, path string }
@@ -223,13 +284,35 @@ func languageStep(o domain.Options) domain.Step {
 	}
 	return domain.Step{ID: "language-tools", Label: label, Kind: "language-tools", Check: domain.Check{Kind: "language-tools"}}
 }
-func addChezmoi(p *domain.Plan, h domain.Host, add func(domain.Step)) {
-	if h.ChezmoiDir != "" && !within(h.Home, h.ChezmoiDir) {
+
+// chezmoiAdds keeps the chosen imported dotfiles that inspection offered:
+// a file that now holds a key or a secret is never added.
+func chezmoiAdds(h domain.Host, o domain.Options) []string {
+	var added []string
+	for _, path := range h.ChezmoiCandidates {
+		if Has(o.ChezmoiAdd, path) {
+			added = append(added, path)
+		}
+	}
+	return added
+}
+
+// addChezmoi plans adopting setup's chosen configuration, and the imported
+// dotfiles chosen for chezmoi, into chezmoi's source.
+func addChezmoi(p *domain.Plan, h domain.Host, added []string, add func(domain.Step)) {
+	if h.ChezmoiIncoming {
+		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "chezmoi-imported", Title: "Review your imported chezmoi source", Instructions: "The import brings your previous chezmoi source, so nothing is added to it now. Review it with chezmoi status, then run setup again to adopt files.", Required: false})
+	} else if h.ChezmoiDir != "" && !within(h.Home, h.ChezmoiDir) {
 		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "chezmoi-location", Title: "Adopt files in your custom chezmoi source", Instructions: "The source outside your home is preserved; review and add selected files manually.", Required: true})
 	} else if h.ChezmoiDirty {
 		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "chezmoi-conflict", Title: "Preserve pending chezmoi source edits", Instructions: "Reconcile source edits before adopting the new live settings.", Required: false})
 	} else {
-		add(domain.Step{ID: "chezmoi", Label: "Adopt selected configuration into chezmoi", Kind: "chezmoi", Check: domain.Check{Kind: "chezmoi"}})
+		label := "Adopt selected configuration into chezmoi"
+		if len(added) > 0 {
+			label += fmt.Sprintf(", with %d imported dotfiles", len(added))
+			p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "dotfiles-commit", Title: "Commit and push the dotfiles you added", Instructions: "Setup adds " + homeList(h.Home, added) + " to chezmoi's source without committing. Review them with chezmoi git status, then commit and push them yourself; a public repository makes them public.", Required: false})
+		}
+		add(domain.Step{ID: "chezmoi", Label: label, Kind: "chezmoi", Check: domain.Check{Kind: "chezmoi", Expected: strings.Join(added, "\n")}})
 	}
 }
 func within(root, path string) bool {
