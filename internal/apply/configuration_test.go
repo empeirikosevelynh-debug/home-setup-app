@@ -45,6 +45,41 @@ func TestGitPreservesIdentityAndIncludes(t *testing.T) {
 		t.Fatal("guide settings missing")
 	}
 }
+func TestGitIncludeOverrideDeferred(t *testing.T) {
+	git, e := exec.LookPath("git")
+	if e != nil {
+		t.Skip("Git unavailable")
+	}
+	for _, c := range []struct {
+		local    string
+		deferred bool
+	}{{"[core]\n editor = vim\n", true}, {"[core]\n pager = delta\n", false}} {
+		h := testutil.FreshHost(t.TempDir())
+		h.Tools["git"] = git
+		path := filepath.Join(h.Home, ".gitconfig")
+		os.WriteFile(filepath.Join(h.Home, ".gitconfig.local"), []byte(c.local), 0600)
+		original := "[core]\n editor = nano\n[include]\n path = .gitconfig.local\n"
+		os.WriteFile(path, []byte(original), 0600)
+		s, _ := (files.Manager{Roots: []string{h.Home}}).Inspect(path)
+		h.Files[path] = s
+		e = ConfigureGit(context.Background(), h, command.ProcessRunner{})
+		got, _ := os.ReadFile(path)
+		if c.deferred && (!errors.Is(e, ErrDeferred) || string(got) != original) {
+			t.Fatal("included override was edited around", e, string(got))
+		}
+		if !c.deferred {
+			if e != nil {
+				t.Fatal(e)
+			}
+			s, _ = (files.Manager{Roots: []string{h.Home}}).Inspect(path)
+			h.Files[path] = s
+			ok, e := ConfigurationHandlers(command.ProcessRunner{})["git"].Verify(context.Background(), h, domain.Plan{}, domain.Step{}, "")
+			if !ok || e != nil {
+				t.Fatal("matching include blocked verification", e)
+			}
+		}
+	}
+}
 func pluginHost(t *testing.T) domain.Host {
 	h := testutil.FreshHost(t.TempDir())
 	h.Tools["fish"] = "/fake/fish"
@@ -63,7 +98,7 @@ func TestFisherBootstrapBeforeManifest(t *testing.T) {
 		}
 		return nil
 	})
-	if e := InstallPlugins(context.Background(), h, []string{"jorgebucaran/autopair.fish"}, r); e != nil || calls < 2 {
+	if e := InstallPlugins(context.Background(), h, []string{"jorgebucaran/autopair.fish"}, r); e != nil || calls != 1 {
 		t.Fatal(e, calls)
 	}
 }
@@ -81,6 +116,29 @@ func TestOnlySelectedPluginsInstalled(t *testing.T) {
 	}
 	if len(args) == 0 || args[len(args)-1] != "jorgebucaran/autopair.fish" || strings.Contains(strings.Join(args, " "), "plugin-git") {
 		t.Fatal("selection not respected", args)
+	}
+	for _, a := range args {
+		if a == "--no-config" {
+			t.Fatal("fish --no-config does not save Fisher's universal variables", args)
+		}
+	}
+}
+func TestStoredFisherStateDeferred(t *testing.T) {
+	for _, line := range []string{`SETUVAR _fisher_plugins:jorgebucaran/fisher\x1ePatrickF1/fzf\x2efish`, `SETUVAR --export fisher_path:\x7e/\x2efish`, `SETUVAR _fisher_plugins:\x1d`} {
+		h := pluginHost(t)
+		path := filepath.Join(h.Home, ".config/fish/fish_variables")
+		os.MkdirAll(filepath.Dir(path), 0700)
+		os.WriteFile(path, []byte("# VERSION: 3.0\n"+line+"\n"), 0600)
+		e := InstallPlugins(context.Background(), h, []string{"jorgebucaran/autopair.fish"}, runFn(func(context.Context, domain.Command, io.Writer) error {
+			t.Fatal("existing Fisher state should defer", line)
+			return nil
+		}))
+		if !errors.Is(e, ErrDeferred) {
+			t.Fatal(line, e)
+		}
+		if _, e = os.Stat(filepath.Join(h.Home, ".config/fish/functions/fisher.fish")); !os.IsNotExist(e) {
+			t.Fatal("Fisher written over existing state")
+		}
 	}
 }
 func TestCustomFishFilesPreserved(t *testing.T) {

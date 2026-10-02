@@ -78,6 +78,8 @@ func (m Manager) ApplyContext(ctx context.Context, c domain.FileChange, backupDi
 	}
 	if before.Exists {
 		mode = before.Mode.Perm()
+	}
+	if before.Exists && !m.SkipBackup {
 		backupName := digest([]byte(c.Path)) + "-" + before.SHA256 + ".bak"
 		backupPath := filepath.Join(backupDir, backupName)
 		bfd, bname, e := m.parent(backupPath, true)

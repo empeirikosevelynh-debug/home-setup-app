@@ -22,7 +22,11 @@ func (p prompts) ask(label, def string) (string, error) {
 	if e := p.ctx.Err(); e != nil {
 		return "", e
 	}
-	if _, e := fmt.Fprintf(p.out, "%s [%s]: ", label, def); e != nil {
+	prompt := fmt.Sprintf("%s [%s]: ", label, def)
+	if def == "" {
+		prompt = label + ": "
+	}
+	if _, e := fmt.Fprint(p.out, prompt); e != nil {
 		return "", e
 	}
 	type answer struct {
@@ -101,7 +105,7 @@ func RunPlain(ctx context.Context, s Services, in io.Reader, out io.Writer) (dom
 	if s.LoadLatest != nil {
 		saved, e := s.LoadLatest()
 		if e != nil && !errors.Is(e, os.ErrNotExist) {
-			return domain.Report{}, fmt.Errorf("read saved choices: %w", e)
+			fmt.Fprintln(out, savedChoicesNotice(e))
 		}
 		if e == nil && saved.Plan.ID != "" {
 			yes, e := p.yes("Restore saved choices and review again?", true)
@@ -147,7 +151,11 @@ func RunPlain(ctx context.Context, s Services, in io.Reader, out io.Writer) (dom
 		if !strings.HasPrefix(path, "/") {
 			return domain.Report{}, errors.New("workspace needs an absolute path")
 		}
-		name, e := p.ask("Module/project name", "none")
+		label := "Project/binary name"
+		if l == "go" {
+			label = "Go module path"
+		}
+		name, e := p.ask(label, "")
 		if e != nil {
 			return domain.Report{}, e
 		}

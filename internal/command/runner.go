@@ -32,7 +32,6 @@ func (r ProcessRunner) Run(ctx context.Context, c domain.Command, out io.Writer)
 		cmd.Stdout = diagnostic
 	}
 	cmd.Stderr = diagnostic
-	defer diagnostic.flush()
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("%s failed to start: %w", c.Path, err)
 	}
@@ -54,9 +53,13 @@ func (r ProcessRunner) Run(ctx context.Context, c domain.Command, out io.Writer)
 	}()
 	err := cmd.Wait()
 	close(done)
+	diagnostic.flush()
 	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if last := diagnostic.lastLine(); last != "" {
+			return fmt.Errorf("%s failed: %w: %s", c.Path, err, last)
 		}
 		return fmt.Errorf("%s failed: %w", c.Path, err)
 	}

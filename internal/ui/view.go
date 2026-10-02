@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"math"
 	"strings"
 )
 
@@ -22,7 +23,7 @@ func (m *model) View() tea.View {
 	title := lipgloss.NewStyle().Foreground(lipgloss.Color(p.lavender)).Bold(true).Render("Golden Gate Setup")
 	body := m.lines
 	if m.form != nil {
-		body = m.form.View()
+		body = m.noticeText() + m.form.View()
 	}
 	if m.stage == "inspecting" {
 		body = "Inspecting the current Mac…"
@@ -37,13 +38,36 @@ func (m *model) View() tea.View {
 	if m.stage == "done" {
 		footer = "↑/↓ scroll · q or Enter closes"
 	}
-	body = bounded(body, max(1, w-4), max(1, m.height-7), m.scroll)
+	offset := m.scroll
+	if m.follow {
+		offset = math.MaxInt
+	}
+	bw, bh := m.bodySize()
+	body = bounded(body, bw, bh, offset)
 	content := title + "\n\n" + body + "\n\n" + bounded(footer, w-4, 1, 0)
 	card := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color(p.lavender)).Padding(0, 1).Width(w - 2).Render(content)
 	v.Content = lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, card)
 	v.ForegroundColor = lipgloss.Color(p.text)
 	v.BackgroundColor = lipgloss.Color(p.surface)
 	return v
+}
+
+// bodySize is the text area inside the card; drawing and scrolling share it.
+func (m *model) bodySize() (int, int) {
+	return max(1, min(72, m.width)-4), max(1, m.height-7)
+}
+func (m *model) maxScroll() int {
+	w, h := m.bodySize()
+	return max(0, len(strings.Split(ansi.Wrap(m.lines, w, ""), "\n"))-h)
+}
+
+// noticeText is shown above the choices after a failed inspection.
+func (m *model) noticeText() string {
+	if m.notice == "" || m.stage != "select" {
+		return ""
+	}
+	w, _ := m.bodySize()
+	return bounded(m.notice, w, 3, 0) + "\n\n"
 }
 func bounded(s string, w, h, offset int) string {
 	if w <= 0 || h <= 0 {

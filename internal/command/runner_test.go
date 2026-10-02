@@ -72,3 +72,25 @@ func TestSelectedCommandStreamsBoundedDiagnostics(t *testing.T) {
 		t.Fatal("stdout progress missing")
 	}
 }
+func TestDiagnosticsKeepMultibyteText(t *testing.T) {
+	var got []string
+	d := diagnostics{emit: func(s string) { got = append(got, s) }, remaining: 65536}
+	d.Write([]byte("café ✓ d"))
+	d.Write([]byte("one\nsplit \xc3"))
+	d.Write([]byte("\xa9\n"))
+	if strings.Join(got, "|") != "café ✓ done|split é" {
+		t.Fatalf("text garbled: %q", got)
+	}
+}
+func TestFailureKeepsFinalOutput(t *testing.T) {
+	var lines []string
+	r := ProcessRunner{Diagnostic: func(s string) { lines = append(lines, s) }}
+	script := `i=0; while [ $i -lt 5000 ]; do echo "progress line $i"; i=$((i+1)); done; echo "Error: the real cause" >&2; exit 3`
+	e := r.Run(context.Background(), domain.Command{Path: "/bin/sh", Args: []string{"-c", script}, Stream: true}, io.Discard)
+	if ExitCode(e) != 3 || !strings.Contains(e.Error(), "Error: the real cause") {
+		t.Fatal("failure cause missing from error", e)
+	}
+	if len(lines) == 0 || lines[len(lines)-1] != "Error: the real cause" || !strings.Contains(strings.Join(lines, "\n"), "lines omitted") {
+		t.Fatal("final output not shown after the budget", len(lines))
+	}
+}

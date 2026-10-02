@@ -10,9 +10,12 @@ import (
 	"strings"
 )
 
-func welcomeForm(resume *bool, available bool, dark func() bool) *huh.Form {
+func welcomeForm(resume *bool, available bool, notice string, dark func() bool) *huh.Form {
 	title := "Migration first"
 	desc := "If reinstalling macOS, restore your files and settings with Migration Assistant before running setup. Existing configuration is preserved unless you review and accept a replacement."
+	if notice != "" {
+		desc += "\n\n" + notice
+	}
 	var fields []huh.Field
 	fields = append(fields, huh.NewNote().Title(title).Description(desc))
 	if available {

@@ -10,11 +10,13 @@
 
 **Symlink or oversized configuration:** automatic writing rejects redirected paths, nonregular files, and configuration larger than 1 MiB. Choose a real workspace location or merge manually. Only verified macOS `/var` and `/tmp` aliases are accepted.
 
+**Preserved Git settings:** a symlinked Git configuration, or an included file that sets the editor, pager, or delta options differently, stays as it is and becomes a manual task. Set those values where you manage them.
+
 **Preserved plugins/chezmoi:** custom functions/manifests, legacy state, dirty sources, and existing managed templates require manual review. A source outside the home receives a manual adoption task.
 
 **Custom XDG/tap:** reconcile the custom configuration location or package substitution before applying standard templates. Do not unset a variable merely to hide settings you still use.
 
-**Unreadable saved record:** preserve a copy, inspect the named JSON/permissions, and move the damaged record out of sessions only after review. A fresh run then needs new choices/approval. Review private contents before sharing.
+**Unreadable saved record:** setup names the file in a notice and continues with default choices. Preserve a copy, inspect the named JSON/permissions, and move the damaged record out of sessions only after review. Review private contents before sharing.
 
 **Partial project:** a nonempty directory is existing user source, even after an interrupted creation. Inspect its manifest/source and complete missing files manually before the project task.
 

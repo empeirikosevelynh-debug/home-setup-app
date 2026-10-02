@@ -189,17 +189,14 @@ func (i Inspector) Read(ctx context.Context, o domain.Options) (domain.Host, err
 			h.FishPluginConflict = true
 		}
 	}
-	if p := h.Tools["fish"]; p != "" {
-		raw, e := i.capture(ctx, p, "--no-config", "--command", "printf '%s\\n' $_fisher_plugins; for key in _fisher_list fisher_path; if set -qU $key; printf 'legacy:%s\\n' $key; end; end")
-		if e != nil {
-			return h, e
-		}
-		for _, line := range strings.Split(raw, "\n") {
-			if strings.HasPrefix(line, "legacy:") {
-				h.FishLegacy = true
-			} else if line != "" {
-				h.FishInstalledPlugins = append(h.FishInstalledPlugins, line)
-			}
+	universal, err := FishUniversalVariables(h)
+	if err != nil {
+		return h, err
+	}
+	h.FishInstalledPlugins = universal["_fisher_plugins"]
+	for _, key := range []string{"_fisher_list", "fisher_path"} {
+		if _, ok := universal[key]; ok {
+			h.FishLegacy = true
 		}
 	}
 	if p := h.Tools["chezmoi"]; p != "" {

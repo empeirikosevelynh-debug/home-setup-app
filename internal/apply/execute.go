@@ -104,10 +104,9 @@ func (e *Executor) Execute(ctx context.Context, p domain.Plan, emit func(domain.
 				return fail(step, domain.StepResult{}, fmt.Errorf("unsatisfied dependency %s", dependency))
 			}
 		}
-		host, er = e.Inspect(ctx, p.Options)
-		if er != nil {
-			return fail(step, domain.StepResult{}, er)
-		}
+		// host is the latest inspection: the one that confirmed the plan, or the
+		// one taken after the previous step acted. Steps that only verify change
+		// nothing, so inspecting again before every step would only repeat it.
 		satisfied, er := e.verify(ctx, host, p, step, dir)
 		if er != nil {
 			return fail(step, domain.StepResult{}, er)
@@ -124,10 +123,11 @@ func (e *Executor) Execute(ctx context.Context, p domain.Plan, emit func(domain.
 			}
 			for _, expected := range step.BeforeFiles {
 				actual := host.Files[expected.Path]
-				if actual.Exists != expected.Exists || actual.SHA256 != expected.SHA256 || actual.Symlink {
+				if actual.Exists != expected.Exists || actual.SHA256 != expected.SHA256 || actual.Symlink != expected.Symlink {
 					return fail(step, result, fmt.Errorf("configuration changed since preview: %s", expected.Path))
 				}
 			}
+			title := "Review " + step.Label
 			switch step.Kind {
 			case "package":
 				if step.Package == nil {
@@ -144,7 +144,7 @@ func (e *Executor) Execute(ctx context.Context, p domain.Plan, emit func(domain.
 					if vendor {
 						result.Status = "preserved"
 						result.Message = "An app appeared outside Homebrew; review its distribution channel."
-						report.ManualTasks = append(report.ManualTasks, domain.ManualTask{Title: "Review existing " + q.Token, Instructions: result.Message})
+						title = "Review existing " + q.Token
 						break
 					}
 				}
@@ -168,7 +168,7 @@ func (e *Executor) Execute(ctx context.Context, p domain.Plan, emit func(domain.
 				return fail(step, result, er)
 			}
 			if result.Status == "preserved" {
-				report.ManualTasks = append(report.ManualTasks, domain.ManualTask{ID: "deferred:" + step.ID, Title: "Review " + step.Label, Instructions: result.Message, Required: true})
+				report.ManualTasks = append(report.ManualTasks, domain.ManualTask{ID: "deferred:" + step.ID, Title: title, Instructions: result.Message, Required: true})
 			}
 			if result.Status != "preserved" {
 				host, er = e.Inspect(ctx, p.Options)

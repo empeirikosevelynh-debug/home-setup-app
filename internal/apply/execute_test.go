@@ -6,10 +6,14 @@ import (
 	"golden-gate-setup/internal/command"
 	"golden-gate-setup/internal/domain"
 	"golden-gate-setup/internal/files"
+	"golden-gate-setup/internal/inspect"
 	"golden-gate-setup/internal/plan"
 	"golden-gate-setup/internal/testutil"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -57,7 +61,7 @@ func TestInstallRechecksRegistration(t *testing.T) {
 	x.Inspect = func(context.Context, domain.Options) (domain.Host, error) {
 		reads++
 		if reads > 1 {
-			h.Packages["formula:fish"] = domain.InstalledPackage{Version: "99.0"}
+			h.Packages["formula:"+plan.Core[1]] = domain.InstalledPackage{Version: "99.0"}
 		}
 		return *h, nil
 	}
@@ -133,5 +137,107 @@ func TestCancelBeforeFileDispatch(t *testing.T) {
 	}
 	if _, e := os.Stat(p.Steps[0].File.Path); !os.IsNotExist(e) {
 		t.Fatal("file was dispatched after cancel")
+	}
+}
+func TestRepeatRunInspectsOnce(t *testing.T) {
+	x, h, p, c := setup(t)
+	if _, e := x.Execute(context.Background(), p, nil); e != nil {
+		t.Fatal(e)
+	}
+	*c = 0
+	reads := 0
+	x.Inspect = func(context.Context, domain.Options) (domain.Host, error) { reads++; return *h, nil }
+	p, _ = plan.Build(*h, p.Options)
+	p.Accepted = true
+	if _, e := x.Execute(context.Background(), p, nil); e != nil {
+		t.Fatal(e)
+	}
+	if *c != 0 || reads != 1 {
+		t.Fatal("satisfied steps inspected the machine again", reads, *c)
+	}
+}
+func TestUnchangedSymlinkedGitConfigIsPreserved(t *testing.T) {
+	git, e := exec.LookPath("git")
+	if e != nil {
+		t.Skip("Git unavailable")
+	}
+	h := testutil.FreshHost(t.TempDir())
+	for _, name := range plan.Core {
+		h.Packages["formula:"+name] = domain.InstalledPackage{Version: "99.0"}
+	}
+	h.Tools["git"] = git
+	target := filepath.Join(h.Home, "dotfiles/gitconfig")
+	os.MkdirAll(filepath.Dir(target), 0700)
+	os.WriteFile(target, []byte("[user]\n name = Example\n"), 0600)
+	os.Symlink(target, filepath.Join(h.Home, ".gitconfig"))
+	inspectHost := func(context.Context, domain.Options) (domain.Host, error) {
+		for _, path := range []string{filepath.Join(h.Home, ".gitconfig"), filepath.Join(h.Home, ".config/git/config")} {
+			s, e := inspect.ReadFileState(h.Home, path)
+			if e != nil {
+				return h, e
+			}
+			h.Files[path] = s
+		}
+		return h, nil
+	}
+	o := plan.DefaultOptions()
+	o.Apps, o.Plugins, o.AdoptChezmoi, o.CaptureInventory, o.PrepareRecovery = nil, nil, false, false, false
+	current, _ := inspectHost(context.Background(), o)
+	p, e := plan.Build(current, o)
+	if e != nil {
+		t.Fatal(e)
+	}
+	p.Accepted = true
+	r := runFn(func(ctx context.Context, c domain.Command, w io.Writer) error {
+		if c.Path == git {
+			return command.ProcessRunner{}.Run(ctx, c, w)
+		}
+		return nil
+	})
+	x := &Executor{Inspect: inspectHost, Build: plan.Build, Runner: r, Files: files.Manager{Roots: []string{h.Home}}, Store: SessionStore{Dir: h.Home + "/sessions"}, Handlers: ConfigurationHandlers(r)}
+	report, e := x.Execute(context.Background(), p, nil)
+	if e != nil || report.Status != "complete" {
+		t.Fatal("symlinked Git configuration stopped the apply", e)
+	}
+	got, _ := os.ReadFile(target)
+	if string(got) != "[user]\n name = Example\n" {
+		t.Fatal("symlink target was changed")
+	}
+	found := false
+	for _, task := range report.ManualTasks {
+		found = found || task.ID == "deferred:git"
+	}
+	if !found {
+		t.Fatal("symlinked Git configuration not left for review", report.ManualTasks)
+	}
+}
+func TestVendorAppDuringApplyReportedOnce(t *testing.T) {
+	x, h, _, _ := setup(t)
+	o := plan.DefaultOptions()
+	o.Apps = []string{"zed"}
+	o.Plugins, o.ConfigureGit, o.AdoptChezmoi, o.CaptureInventory, o.PrepareRecovery = nil, false, false, false, false
+	p, _ := plan.Build(*h, o)
+	p.Accepted = true
+	reads := 0
+	x.Inspect = func(context.Context, domain.Options) (domain.Host, error) {
+		reads++
+		current := *h
+		if reads > 1 {
+			current.Apps = []domain.AppBundle{{Name: "Zed", Path: "/Applications/Zed.app"}}
+		}
+		return current, nil
+	}
+	r, e := x.Execute(context.Background(), p, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	count := 0
+	for _, task := range r.ManualTasks {
+		if strings.Contains(task.Instructions, "appeared outside Homebrew") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatal("vendor app reported", count, "times", r.ManualTasks)
 	}
 }

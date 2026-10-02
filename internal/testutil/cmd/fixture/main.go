@@ -1,3 +1,5 @@
+//go:build darwin
+
 // Fixture is a separate acceptance executable. No fake services are linked
 // into the production command, and every filesystem change stays in its home.
 package main

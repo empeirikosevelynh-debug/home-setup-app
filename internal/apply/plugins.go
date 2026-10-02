@@ -1,7 +1,6 @@
 package apply
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"embed"
@@ -11,10 +10,10 @@ import (
 	"golden-gate-setup/internal/command"
 	"golden-gate-setup/internal/domain"
 	"golden-gate-setup/internal/files"
+	"golden-gate-setup/internal/inspect"
 	"golden-gate-setup/internal/plan"
 	"io"
 	"path/filepath"
-	"strings"
 )
 
 var ErrDeferred = errors.New("existing state requires individual manual review")
@@ -24,7 +23,6 @@ var fisherAssets embed.FS
 
 const FisherRevision = "a04308be92daa6cfecdbb0ca58b1e8508664cff2"
 const FisherSHA256 = "0fb6c81ae3003e95b5671766fa6c25c3597066e29965b7772f6c1b007387356d"
-const FisherStateQuery = "for key in _fisher_list fisher_path _fisher_plugins; if set -qU $key; printf '%s\\n' $key; end; end"
 
 func InstallPlugins(ctx context.Context, h domain.Host, selected []string, r command.Runner) error {
 	if len(selected) == 0 {
@@ -46,12 +44,14 @@ func InstallPlugins(ctx context.Context, h domain.Host, selected []string, r com
 	if tool == "" {
 		return errors.New("Fish unavailable")
 	}
-	var state bytes.Buffer
-	if e := r.Run(ctx, domain.Command{Path: tool, Args: []string{"--no-config", "--command", FisherStateQuery}}, &state); e != nil {
+	state, e := inspect.FishUniversalVariables(h)
+	if e != nil {
 		return e
 	}
-	if strings.TrimSpace(state.String()) != "" {
-		return ErrDeferred
+	for _, key := range []string{"_fisher_list", "fisher_path", "_fisher_plugins"} {
+		if _, ok := state[key]; ok {
+			return ErrDeferred
+		}
 	}
 	data, e := fisherAssets.ReadFile("assets/fisher.fish")
 	if e != nil {
@@ -70,7 +70,9 @@ func InstallPlugins(ctx context.Context, h domain.Host, selected []string, r com
 	if _, e = m.ApplyContext(ctx, domain.FileChange{Path: path, Desired: data, Mode: 0644, Decision: domain.Create}, filepath.Join(h.Home, "Library/Application Support/Golden Gate Setup/configuration-backups")); e != nil {
 		return e
 	}
-	args := []string{"--no-config", "--command", "source $argv[1]; and fisher install $argv[2..-1]", "--", path}
+	// Fisher records installed plugins in universal variables, which fish only
+	// loads and saves when it starts normally; --no-config would lose them.
+	args := []string{"--command", "source $argv[1]; and fisher install $argv[2..-1]", "--", path}
 	args = append(args, selected...)
 	return r.Run(ctx, domain.Command{Path: tool, Args: args, Env: []string{"XDG_CONFIG_HOME=" + filepath.Join(h.Home, ".config")}, Interactive: true}, io.Discard)
 }

@@ -40,7 +40,10 @@ type applyDone struct {
 	err    error
 }
 type externalCancel struct{}
-type resumeMsg struct{ session domain.Session }
+type resumeMsg struct {
+	session domain.Session
+	notice  string
+}
 type model struct {
 	conflictIndex         int
 	ctx                   context.Context
@@ -48,7 +51,8 @@ type model struct {
 	options, draft        domain.Options
 	width, height, scroll int
 	dark, canceled        bool
-	stage, lines          string
+	follow                bool
+	stage, lines, notice  string
 	form                  *huh.Form
 	lists                 []*huh.MultiSelect[string]
 	host                  domain.Host
@@ -99,23 +103,26 @@ func (m *model) Init() tea.Cmd {
 			var e error
 			s, e = m.services.LoadLatest()
 			if e != nil && !errors.Is(e, os.ErrNotExist) {
-				return inspected{err: fmt.Errorf("read saved choices: %w", e)}
+				return resumeMsg{notice: savedChoicesNotice(e)}
 			}
 		}
-		return resumeMsg{s}
+		return resumeMsg{session: s}
 	})
 }
 func (m *model) resizeForm() {
 	if m.form == nil {
 		return
 	}
-	w, h := min(66, max(1, m.width-6)), max(3, m.height-9)
+	w, h := min(66, max(1, m.width-6)), max(3, m.height-9-strings.Count(m.noticeText(), "\n"))
 	for _, l := range m.lists {
 		l.Height(max(2, h-5))
 	}
 	m.form.WithWidth(w).WithHeight(h)
 }
 func (m *model) inspectCmd() tea.Cmd {
+	// Each inspection asks about every replacement again: a file may have
+	// changed since it was approved, and this is how an approval is taken back.
+	m.options.FileChoices = map[string]domain.FileDecision{}
 	o := cloneOptions(m.options)
 	return func() tea.Msg {
 		h, e := m.services.Inspect(m.ctx, o)
@@ -147,15 +154,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case resumeMsg:
 		m.resume = v.session
-		m.form = welcomeForm(&m.useResume, v.session.Plan.ID != "", func() bool { return m.dark })
+		m.form = welcomeForm(&m.useResume, v.session.Plan.ID != "", v.notice, func() bool { return m.dark })
 		m.resizeForm()
 		return m, m.form.Init()
 	case inspected:
 		if v.err != nil {
-			m.err = v.err
-			m.stage = "done"
-			m.lines = v.err.Error()
-			return m, nil
+			return m.reject(v.err)
 		}
 		m.host, m.preview = v.host, v.plan
 		m.conflicts = conflictChanges(m.services, m.host, m.options)
@@ -170,13 +174,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case domain.Event:
 		m.lines += v.Status + ": " + v.Text + "\n"
 		if len(m.lines) > 65536 {
-			m.lines = m.lines[len(m.lines)-65536:]
+			cut := len(m.lines) - 65536
+			if i := strings.IndexByte(m.lines[cut:], '\n'); i >= 0 {
+				cut += i + 1
+			}
+			m.lines = m.lines[cut:]
 		}
 		return m, m.readEvent()
 	case applyDone:
 		m.report, m.err = v.report, v.err
 		m.stage = "done"
 		m.scroll = 0
+		m.follow = false
 		m.lines = ReportText(v.report)
 		if v.err != nil {
 			m.lines += "\n" + v.err.Error()
@@ -202,6 +211,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cancel()
 				}
 				m.lines += "Cancel requested; waiting for the current process.\n"
+				m.follow = true
 				return m, nil
 			}
 			m.canceled = true
@@ -211,15 +221,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.stage == "files" {
+			if m.scrollKey(v.String()) {
+				return m, nil
+			}
 			switch v.String() {
-			case "up":
-				m.scroll = max(0, m.scroll-1)
-			case "down":
-				m.scroll++
-			case "pgdown":
-				m.scroll += max(1, m.height-8)
-			case "pgup":
-				m.scroll = max(0, m.scroll-m.height+8)
 			case "y", "n", "enter":
 				if v.String() == "y" {
 					m.options.FileChoices[m.conflicts[m.conflictIndex].Path] = domain.Replace
@@ -229,33 +234,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.showConflict()
 				} else {
 					p, e := m.services.Build(m.host, m.options)
-					m.preview = p
 					if e != nil {
-						m.err = e
-						m.stage = "done"
-						m.lines = e.Error()
-					} else {
-						m.showPreview()
+						return m.reject(e)
 					}
+					m.preview = p
+					m.showPreview()
 				}
 			}
 			return m, nil
 		}
-		if m.stage == "done" || m.stage == "applying" {
-			switch v.String() {
-			case "up":
-				m.scroll = max(0, m.scroll-1)
-				return m, nil
-			case "down":
-				m.scroll++
-				return m, nil
-			case "pgdown":
-				m.scroll += max(1, m.height-8)
-				return m, nil
-			case "pgup":
-				m.scroll = max(0, m.scroll-m.height+8)
-				return m, nil
-			}
+		if (m.stage == "done" || m.stage == "applying") && m.scrollKey(v.String()) {
+			return m, nil
 		}
 		if m.stage == "done" {
 			if v.String() == "q" || v.String() == "enter" {
@@ -268,19 +257,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "e":
 				m.edit()
 				return m, m.form.Init()
-			case "up":
-				m.scroll = max(0, m.scroll-1)
-			case "down":
-				m.scroll++
-			case "pgdown":
-				m.scroll += max(1, m.height-8)
-			case "pgup":
-				m.scroll = max(0, m.scroll-m.height+8)
 			case "a":
 				if m.preview.Supported && m.services.Apply != nil {
 					m.preview.Accepted = true
 					m.stage = "applying"
 					m.scroll = 0
+					m.follow = true
 					m.lines = "Applying the reviewed plan…\n"
 					ctx, cancel := context.WithCancel(m.ctx)
 					m.cancel = cancel
@@ -297,6 +279,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}()
 					return m, m.readEvent()
 				}
+			default:
+				m.scrollKey(v.String())
 			}
 			return m, nil
 		}
@@ -322,6 +306,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.commitDraft()
 				m.stage = "inspecting"
 				m.form = nil
+				m.notice = ""
 				return m, m.inspectCmd()
 			case "files":
 				for i, c := range m.conflicts {
@@ -330,14 +315,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				p, e := m.services.Build(m.host, m.options)
-				m.preview = p
 				if e != nil {
-					m.err = e
-					m.stage = "done"
-					m.lines = e.Error()
-				} else {
-					m.showPreview()
+					return m.reject(e)
 				}
+				m.preview = p
+				m.showPreview()
 				return m, nil
 			}
 		}
@@ -350,6 +332,35 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 func (m *model) readEvent() tea.Cmd { return func() tea.Msg { return <-m.events } }
+
+// reject returns to the choices after an inspection or plan fails, keeping
+// them so a mistyped path or module can be corrected instead of starting over.
+func (m *model) reject(e error) (tea.Model, tea.Cmd) {
+	m.stage = "select"
+	m.notice = "Needs attention: " + e.Error()
+	m.edit()
+	return m, m.form.Init()
+}
+
+// scrollKey moves through the text body. While applying, the view follows new
+// output until the user scrolls up, and follows again once back at the end.
+func (m *model) scrollKey(key string) bool {
+	page := max(1, m.height-8)
+	delta := map[string]int{"up": -1, "down": 1, "pgup": -page, "pgdown": page}[key]
+	if delta == 0 {
+		return false
+	}
+	end := m.maxScroll()
+	if m.follow {
+		m.scroll = end
+	}
+	m.scroll = min(max(0, m.scroll+delta), end)
+	m.follow = m.stage == "applying" && m.scroll == end
+	return true
+}
+func savedChoicesNotice(e error) string {
+	return "Saved choices were not restored (" + e.Error() + "). Setup starts from the default choices; remove that file to stop this notice."
+}
 func (m *model) showPreview() {
 	m.form = nil
 	m.stage = "preview"
@@ -445,5 +456,6 @@ func (m *model) showConflict() {
 func restoredOptions(o domain.Options) domain.Options {
 	o = cloneOptions(o)
 	o.FileChoices = map[string]domain.FileDecision{}
+	o.RecoveryDate = plan.DefaultOptions().RecoveryDate
 	return o
 }

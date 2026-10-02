@@ -13,17 +13,16 @@ import (
 )
 
 func setupServices(probe func(context.Context, domain.Options) (domain.Host, error)) ui.Services {
-	home, _ := os.UserHomeDir()
+	home, homeErr := os.UserHomeDir()
 	runner := &command.ProcessRunner{}
 	store := apply.SessionStore{Dir: filepath.Join(home, "Library/Application Support/Golden Gate Setup/sessions"), Root: home}
 	s := ui.Services{Inspect: probe, Build: plan.Build, LoadLatest: store.Latest}
 	s.BindHandoff = func(f func(context.Context, domain.Command) error) { runner.Handoff = f }
 	s.Apply = func(ctx context.Context, p domain.Plan, emit func(domain.Event)) (domain.Report, error) {
-		h, e := probe(ctx, p.Options)
-		if e != nil {
-			return domain.Report{}, e
+		if homeErr != nil {
+			return domain.Report{}, homeErr
 		}
-		roots := []string{h.Home}
+		roots := []string{home}
 		for _, w := range p.Options.Workspaces {
 			if w.Path != "" && plan.Has(p.Options.Languages, w.Language) {
 				roots = append(roots, w.Path)
