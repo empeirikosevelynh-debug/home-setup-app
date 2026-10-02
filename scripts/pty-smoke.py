@@ -136,7 +136,7 @@ def preview(t, go=False, hidden=False):
     t.key(b"\r")
     t.wait("Previous home folder")
     t.key(b"\r")
-    t.wait("Previous app list")
+    t.wait("Homebrew-full.Brewfile")
     t.key(b"\r")
     t.wait("Review the current plan")
 

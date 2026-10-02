@@ -48,8 +48,19 @@ Exit codes: `0` for completed automated work, a declined preview, or metadata; `
 - Local chezmoi adoption of chosen files with hooks and automatic Git actions disabled. Existing managed entries and pending source edits are preserved.
 - Optional Go/Crystal/Nim toolchains, servers, and new workspaces using actual project/module names. Existing source and manifests survive.
 - Dated Homebrew reinstall records, exhaustive installed-package/app metadata, and recovery instructions. Native Applite export remains a visible GUI step.
+- Optionally, what a previous Mac had: a chezmoi dotfiles repository, chosen folders from the previous home folder, and the previous app list. See [Bring over your previous Mac](#bring-over-your-previous-mac).
 
 Missing Go/Nim servers use gopls 0.23.0 and nimlangserver 1.14.0. Nimble may request its required Nim 2.0.8 build compiler in its managed area; review the foreground prompt. Recorded Homebrew versions are metadata, not an installation lock. Required old Fish/lazygit/Go versions need deliberate updates. Custom tap substitutions or `XDG_CONFIG_HOME` require reconciliation before automatic setup; a chezmoi source outside the home is adopted manually.
+
+## Bring over your previous Mac
+
+Migration Assistant moves a whole account, app data included. To start fresh instead, the wizard's last questions bring over three things, each optional:
+
+- **Dotfiles repository.** Name your chezmoi repository: a GitHub user (`you` means `you/dotfiles`), `you/repo`, or a Git URL. Setup clones it with `chezmoi init`, which can ask for sign-in or template answers in the terminal; a private repository needs `gh auth login` first, an HTTPS token, or an SSH key. Its plain files then go through the usual review: created where missing, kept where different unless you approve a replacement with a backup. Templates, encrypted and modify files, links and scripts are listed for `chezmoi diff` and `chezmoi apply`. The repository wins over the starter configuration, the Git step and the Fish plugin manifest.
+- **Folders from the previous home folder.** Point setup at the old home folder on a drive, a share or a restored backup, such as `/Volumes/Backup/Users/you`, and tick folders. Visible folders are preselected except Applications; hidden folders start unticked, and those marked keys hold private keys. Nothing here is replaced or deleted: where a file differs, yours stays and theirs is saved in `~/Imported conflicts/<date>/`. Contents, permissions, modification times and extended attributes are copied; links are recreated, never followed, and an existing bundle such as a Photos library is never merged into. Files the dotfiles repository manages, `Library` and the Trash are left out. iCloud-only files are not copied.
+- **Previous app list.** Choose a `Homebrew-full.Brewfile` from a Golden Gate Recovery folder, which setup suggests from the previous home folder or this one, and tick entries. Missing taps, formulae and casks are installed; installed ones are left alone and nothing is upgraded. App Store and other entries become a follow-up.
+
+The first plan installs apps, then clones the repository or copies the folders. When the repository still needs cloning, or the import brings dotfiles or a project folder, the rest of setup waits: press `r` on the summary (plain mode asks) to review it against what was brought over. Running the import again copies only what is new and never saves a conflict twice.
 
 ## Preserve and recover
 
@@ -57,11 +68,11 @@ Replacements use an atomic write, an existing-state recheck, and a private backu
 
 Cancellation stops new steps and records interrupted work. Start again, restore saved choices if offered, inspect and approve a new plan. Existing registrations and matching files are skipped. Partial projects/recovery exports can need manual review. See [troubleshooting](docs/troubleshooting.md).
 
-App lists, inventories, and local chezmoi adoption each save different parts of the setup. **None backs up personal data.** Complete and test Time Machine or Kopia separately. After reinstalling macOS, migrate an existing account before rebuilding it. See [recovery](docs/recovery.md).
+App lists, inventories, and local chezmoi adoption each save different parts of the setup. **None backs up personal data.** Complete and test Time Machine or Kopia separately. After reinstalling macOS, migrate an existing account before rebuilding it, or bring over your files, dotfiles and app list as above. See [recovery](docs/recovery.md).
 
 ## Windows (preview)
 
-On Windows 11 (x64 or Arm) the wizard installs the core command-line tools, the chosen apps (Warp, Zed, GitHub Desktop, KopiaUI) and Go or Nim with [Chocolatey](https://chocolatey.org/). It configures Starship, Zed, lazygit, Git and chezmoi with the same review, diffs and backups as on macOS. Fish and its plugins, Crystal, project workspaces and recovery records are macOS-only for now. Warp runs PowerShell; the summary lists the profile lines that start Starship and zoxide.
+On Windows 11 (x64 or Arm) the wizard installs the core command-line tools, the chosen apps (Warp, Zed, GitHub Desktop, KopiaUI) and Go or Nim with [Chocolatey](https://chocolatey.org/). It configures Starship, Zed, lazygit, Git and chezmoi with the same review, diffs and backups as on macOS. Fish and its plugins, Crystal, project workspaces, recovery records and bringing over a previous Mac are macOS-only for now. Warp runs PowerShell; the summary lists the profile lines that start Starship and zoxide.
 
 Prerequisites, in PowerShell opened with **Run as administrator**:
 
