@@ -5,7 +5,7 @@ import (
 	"io/fs"
 )
 
-//go:embed all:assets manifest.json
+//go:embed assets manifest.json
 var content embed.FS
 
 func Load(name string) ([]byte, error) {
