@@ -65,6 +65,16 @@ func OptionalHandlers(r command.Runner, m files.Manager) map[string]Handler {
 			}
 			return m.Imported(c, *s.Import)
 		}},
+		"chezmoi-init": {Apply: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (domain.StepResult, error) {
+			if s.Command == nil {
+				return domain.StepResult{}, fmt.Errorf("clone step has no reviewed repository")
+			}
+			cmd := *s.Command
+			cmd.Path, cmd.Interactive = tool(h, "chezmoi"), true
+			return domain.StepResult{ID: s.ID}, r.Run(c, cmd, io.Discard)
+		}, Verify: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (bool, error) {
+			return h.DotfilesState == "cloned" || h.DotfilesState == "waiting", nil
+		}},
 		"recovery": {Apply: func(c context.Context, h domain.Host, p domain.Plan, s domain.Step, d string) (domain.StepResult, error) {
 			dir := recoveryDir(h, p)
 			var inventory string
@@ -162,4 +172,17 @@ func importMessage(done domain.ImportScan, job domain.ImportJob) string {
 		parts = append(parts, count(done.Special, "special file")+" skipped")
 	}
 	return strings.Join(parts, " · ")
+}
+
+// sourceContents reads a file the plan restores from the dotfiles source,
+// refusing one that changed since it was reviewed.
+func sourceContents(s domain.FileSource) ([]byte, error) {
+	f, err := (files.Manager{Roots: []string{s.Root}}).Inspect(s.Path)
+	if err != nil {
+		return nil, err
+	}
+	if !f.Exists || f.SHA256 != s.SHA256 {
+		return nil, fmt.Errorf("your dotfiles changed since preview: %s", s.Path)
+	}
+	return f.Contents, nil
 }

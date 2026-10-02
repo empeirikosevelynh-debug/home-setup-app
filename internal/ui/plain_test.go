@@ -25,7 +25,7 @@ func TestPlainAnswersRemainSeparate(t *testing.T) {
 		return services(t).Inspect(context.Background(), o)
 	}
 	var out bytes.Buffer
-	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\nnone\nnone\nno\n"), &out)
+	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\nnone\nnone\nnone\nno\n"), &out)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestCorruptSavedSessionIsReported(t *testing.T) {
 	s := services(t)
 	s.LoadLatest = func() (domain.Session, error) { return domain.Session{}, errors.New("invalid saved session") }
 	var out bytes.Buffer
-	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\nnone\nnone\nno\n"), &out)
+	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\nnone\nnone\nnone\nno\n"), &out)
 	if err != nil {
 		t.Fatal("damaged session blocked setup", err)
 	}
@@ -55,7 +55,7 @@ func TestPlainProjectNameHasNoPlaceholder(t *testing.T) {
 	s := services(t)
 	path := t.TempDir() + "/project"
 	var out bytes.Buffer
-	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnim\nno\nno\nno\nno\n"+path+"\n\nyes\nnone\nnone\n"), &out)
+	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnim\nno\nno\nno\nno\n"+path+"\n\nyes\nnone\nnone\nnone\n"), &out)
 	if err == nil || !strings.Contains(err.Error(), "project/binary name") {
 		t.Fatal("empty project name was not rejected", err)
 	}
@@ -138,9 +138,9 @@ func TestPlainPreviousAppList(t *testing.T) {
 		return h, e
 	}
 	var out bytes.Buffer
-	// No previous home folder; Enter accepts the suggested app list, then
-	// picks one entry.
-	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\nnone\n\nformula:jq\nno\n"), &out)
+	// No dotfiles or previous home folder; Enter accepts the suggested app
+	// list, then picks one entry.
+	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\nnone\nnone\n\nformula:jq\nno\n"), &out)
 	if err != nil {
 		t.Fatal(err, out.String())
 	}

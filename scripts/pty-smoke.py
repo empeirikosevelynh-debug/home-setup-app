@@ -132,6 +132,8 @@ def preview(t, go=False, hidden=False):
         t.pump()
         t.key(b"\r")
         t.key(b"n")
+    t.wait("Dotfiles repository")
+    t.key(b"\r")
     t.wait("Previous home folder")
     t.key(b"\r")
     t.wait("Previous app list")
@@ -183,7 +185,7 @@ def main():
                     checks.append(f"{theme}: {mode}, terminal restored")
                 finally:
                     t.close()
-        transcript = b"no\nzed\nnone\nnone\nno\nno\nno\nno\nnone\nnone\nno\n"
+        transcript = b"no\nzed\nnone\nnone\nno\nno\nno\nno\nnone\nnone\nnone\nno\n"
         for label,data,expected in (("sequential",transcript,0),("early EOF",b"no\nzed\n",1),("final EOF",transcript[:-1],1)):
             run = subprocess.run([str(fixture),"--accessible"],input=data,capture_output=True,timeout=12)
             assert run.returncode==expected,(label,run.stdout,run.stderr)

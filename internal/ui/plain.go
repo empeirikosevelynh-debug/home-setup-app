@@ -188,6 +188,14 @@ func RunPlain(ctx context.Context, s Services, in io.Reader, out io.Writer) (dom
 		o.Workspaces = append(o.Workspaces, domain.Workspace{Language: l, Path: path, Module: name, EntryPoint: entry, Create: create})
 	}
 	if goos != "windows" {
+		if o.DotfilesRepo, e = p.ask("Dotfiles repository for chezmoi (a GitHub user, user/repo or a Git URL; none skips)", or(o.DotfilesRepo, "none")); e != nil {
+			return domain.Report{}, e
+		}
+		if o.DotfilesRepo == "none" {
+			o.DotfilesRepo = ""
+		} else if e = plan.ValidDotfilesRepo(o.DotfilesRepo); e != nil {
+			return domain.Report{}, e
+		}
 		if e = askImport(p, &o); e != nil {
 			return domain.Report{}, e
 		}
@@ -217,7 +225,7 @@ func reviewPlain(ctx context.Context, s Services, p prompts, in io.Reader, o dom
 		return domain.Report{}, domain.Plan{}, e
 	}
 	for _, c := range conflictChanges(s, h, o) {
-		fmt.Fprintln(out, c.Path+"\n"+DiffText(h.Files[c.Path].Contents, c.Desired))
+		fmt.Fprintln(out, c.Path+"\n"+DiffText(h.Files[c.Path].Contents, proposed(h, c)))
 		yes, e := p.yes("Replace this file and save a private backup?", false)
 		if e != nil {
 			return domain.Report{}, domain.Plan{}, e
@@ -255,6 +263,13 @@ func reviewPlain(ctx context.Context, s Services, p prompts, in io.Reader, o dom
 	return r, reviewed, e
 }
 
+// or is value, or def when value is empty.
+func or(value, def string) string {
+	if value == "" {
+		return def
+	}
+	return value
+}
 func (p prompts) readLine() ([]byte, error) {
 	var line []byte
 	for {

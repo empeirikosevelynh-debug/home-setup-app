@@ -8,10 +8,13 @@ import (
 	"golden-gate-setup/internal/inspect"
 	"golden-gate-setup/internal/plan"
 	"golden-gate-setup/internal/testutil"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -288,5 +291,87 @@ func TestImportRead(t *testing.T) {
 		if e != nil || len(h.ImportProblems) != 1 || len(h.Import) != 0 {
 			t.Fatal("unreadable folder not reported", e, h.ImportProblems)
 		}
+	}
+}
+
+type runFunc func(context.Context, domain.Command, io.Writer) error
+
+func (f runFunc) Run(c context.Context, d domain.Command, w io.Writer) error { return f(c, d, w) }
+
+func TestDotfilesRead(t *testing.T) {
+	h := testutil.FreshHost(t.TempDir())
+	source := filepath.Join(h.Home, ".local/share/chezmoi")
+	for name, contents := range map[string]string{"dot_zshrc": "zsh", "private_dot_netrc": "machine example", "dot_gitconfig.tmpl": "{{ .email }}", "run_once_setup.sh": "true", ".git/config": "[core]"} {
+		os.MkdirAll(filepath.Dir(filepath.Join(source, name)), 0700)
+		os.WriteFile(filepath.Join(source, name), []byte(contents), 0600)
+	}
+	targets := map[string]string{filepath.Join(h.Home, ".zshrc"): "dot_zshrc", filepath.Join(h.Home, ".netrc"): "private_dot_netrc", filepath.Join(h.Home, ".gitconfig"): "dot_gitconfig.tmpl"}
+	origin, state := "https://github.com/you/dotfiles.git", ""
+	r := runFunc(func(_ context.Context, c domain.Command, w io.Writer) error {
+		switch {
+		case c.Path == "/fake/git" && c.Args[len(c.Args)-1] == "remote.origin.url":
+			io.WriteString(w, origin+"\n")
+		case c.Path == "/fake/git":
+		case c.Path == "/fake/chezmoi" && len(c.Args) == 1 && c.Args[0] == "source-path":
+			io.WriteString(w, source+"\n")
+		case c.Path == "/fake/chezmoi" && c.Args[0] == "managed":
+			for i, a := range c.Args {
+				if a == "--persistent-state" {
+					state = c.Args[i+1]
+				}
+			}
+			var listed []string
+			for target := range targets {
+				listed = append(listed, target)
+			}
+			io.WriteString(w, strings.Join(listed, "\x00"))
+		case c.Path == "/fake/chezmoi" && c.Args[0] == "source-path":
+			for _, target := range c.Args[slices.Index(c.Args, "--")+1:] {
+				io.WriteString(w, filepath.Join(source, targets[target])+"\n")
+			}
+		default:
+			return fmt.Errorf("unexpected command %v", c)
+		}
+		return nil
+	})
+	i := inspect.Inspector{Home: h.Home, Runner: r, Platform: func(context.Context) (domain.Host, error) { return h, nil }, AppsDirs: []string{filepath.Join(h.Home, "Applications")}, Lookup: func(p string) (string, error) {
+		if p == "git" || p == "chezmoi" {
+			return "/fake/" + p, nil
+		}
+		return "", fs.ErrNotExist
+	}}
+	o := plan.DefaultOptions()
+	o.DotfilesRepo = "you"
+	before := snapshot(t, h.Home)
+	got, err := i.Read(context.Background(), o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, snapshot(t, h.Home)) {
+		t.Fatal("inspection wrote files")
+	}
+	if _, err := os.Stat(filepath.Dir(state)); state == "" || !os.IsNotExist(err) {
+		t.Fatal("chezmoi's temporary state was not removed:", state)
+	}
+	if got.DotfilesState != "cloned" || !got.DotfilesScripts || len(got.Dotfiles) != 2 || !reflect.DeepEqual(got.DotfilesManual, []string{filepath.Join(h.Home, ".gitconfig")}) {
+		t.Fatalf("dotfiles misread: %+v", got)
+	}
+	modes := map[string]fs.FileMode{}
+	for _, d := range got.Dotfiles {
+		modes[filepath.Base(d.Target)] = d.Mode
+		if d.Source.Root == "" || d.Source.SHA256 == "" || len(d.Contents) == 0 {
+			t.Fatalf("%+v", d)
+		}
+	}
+	if modes[".zshrc"] != 0644 || modes[".netrc"] != 0600 {
+		t.Fatal(modes)
+	}
+	origin = "https://github.com/someone/dotfiles.git"
+	if got, err = i.Read(context.Background(), o); err != nil || got.DotfilesState != "other" || got.DotfilesOrigin != origin {
+		t.Fatal("another repository's source not reported", err, got.DotfilesState)
+	}
+	os.RemoveAll(source)
+	if got, err = i.Read(context.Background(), o); err != nil || got.DotfilesState != "missing" {
+		t.Fatal("missing source not reported", err, got.DotfilesState)
 	}
 }

@@ -119,10 +119,20 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 	if err := addPrevious(&p, h, o, handled, pkg, add); err != nil {
 		return p, err
 	}
+	cloning, err := addClone(&p, h, o, add)
+	if err != nil {
+		return p, err
+	}
+	if cloning {
+		p.Later = "Restoring your dotfiles and the rest of setup are planned in a second review, once the repository is cloned."
+		p.ID, err = Fingerprint(p)
+		return p, err
+	}
 	later, err := addImport(&p, h, o, add)
 	if err != nil {
 		return p, err
 	}
+	restored := addRestore(&p, h, o, add)
 	if later {
 		p.Later = "Configuration files, Git, Fish plugins, project workspaces, language tools, chezmoi and recovery records are planned in a second review, once the imported files are here."
 		p.ID, err = Fingerprint(p)
@@ -133,6 +143,9 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 		config = append(config, configFile{"recovery/kopiaignore", filepath.Join(h.Home, ".kopiaignore")})
 	}
 	for _, c := range config {
+		if restored[c.path] {
+			continue
+		}
 		if err := addConfig(&p, h, o, c, add); err != nil {
 			return p, err
 		}
@@ -164,11 +177,15 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 		}
 	}
 	if o.ConfigureGit {
-		add(gitStep(h))
+		if restored[filepath.Join(h.Home, ".gitconfig")] || restored[filepath.Join(h.Home, ".config/git/config")] {
+			p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "git-dotfiles", Title: "Set Git's editor and viewer in your dotfiles", Instructions: "Your dotfiles repository manages Git's configuration, so setup leaves it as restored. To use Zed and delta, add these settings there: core.editor = zed --wait, core.pager = delta, interactive.diffFilter = delta --color-only, delta.navigate = true.", Required: false})
+		} else {
+			add(gitStep(h))
+		}
 	}
 	if len(o.Plugins) > 0 {
 		if PluginsSatisfied(h, o.Plugins) {
-		} else if h.FishPluginConflict || h.FishLegacy || h.Files[filepath.Join(h.Home, ".config/fish/fish_plugins")].Exists {
+		} else if h.FishPluginConflict || h.FishLegacy || h.Files[filepath.Join(h.Home, ".config/fish/fish_plugins")].Exists || restored[filepath.Join(h.Home, ".config/fish/fish_plugins")] {
 			p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "plugins-conflict", Title: "Preserve existing Fish plugin files", Instructions: "Review the selected plugins and existing functions before adding them. No existing plugin or function is removed.", Required: false})
 		} else {
 			add(domain.Step{ID: "plugins", Label: "Install selected Fish plugins", Kind: "plugins", Check: domain.Check{Kind: "plugins", Expected: strings.Join(o.Plugins, "\n")}})

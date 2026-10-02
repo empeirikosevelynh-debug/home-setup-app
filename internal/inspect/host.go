@@ -147,9 +147,6 @@ func (i Inspector) Read(ctx context.Context, o domain.Options) (domain.Host, err
 		if err = i.readPrevious(ctx, &h, o); err != nil {
 			return h, err
 		}
-		if err = readImport(&h, o); err != nil {
-			return h, err
-		}
 	}
 	for _, name := range []string{"fish", "starship", "zoxide", "chezmoi", "gh", "fzf", "fd", "bat", "eza", "rg", "delta", "lazygit", "git", "zed", "go", "gopls", "golangci-lint", "dlv", "crystal", "crystalline", "ameba", "nim", "nimble", "nimpretty", "nimlangserver"} {
 		if p, e := i.lookup(name); e == nil {
@@ -216,7 +213,7 @@ func (i Inspector) Read(ctx context.Context, o domain.Options) (domain.Host, err
 		h.Files[path] = state
 	}
 	if h.OS == "windows" {
-		return i.finish(ctx, h)
+		return i.finish(ctx, h, o)
 	}
 	for _, sub := range []string{"functions", "conf.d", "completions"} {
 		entries, e := os.ReadDir(filepath.Join(h.Home, ".config/fish", sub))
@@ -237,17 +234,25 @@ func (i Inspector) Read(ctx context.Context, o domain.Options) (domain.Host, err
 			h.FishLegacy = true
 		}
 	}
-	return i.finish(ctx, h)
+	return i.finish(ctx, h, o)
 }
 
-// finish reads state shared by both platforms after the platform's own.
-func (i Inspector) finish(ctx context.Context, h domain.Host) (domain.Host, error) {
+// finish reads state shared by both platforms after the platform's own,
+// then what macOS brings over: the dotfiles repository before the previous
+// home folder, whose import leaves the repository's files alone.
+func (i Inspector) finish(ctx context.Context, h domain.Host, o domain.Options) (domain.Host, error) {
 	if p := h.Tools["chezmoi"]; p != "" {
 		if err := i.readChezmoi(ctx, &h, p); err != nil {
 			return h, err
 		}
 	}
-	return h, nil
+	if h.OS == "windows" {
+		return h, nil
+	}
+	if err := i.readDotfiles(ctx, &h, o); err != nil {
+		return h, err
+	}
+	return h, readImport(&h, o)
 }
 func (i Inspector) readApps(h domain.Host) ([]domain.AppBundle, error) {
 	dirs := i.AppsDirs

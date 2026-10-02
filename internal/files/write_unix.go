@@ -72,7 +72,9 @@ func (m Manager) ApplyContext(ctx context.Context, c domain.FileChange, backupDi
 	if mode == 0 {
 		mode = 0644
 	}
-	if before.Exists {
+	// A replacement keeps the file's mode, except a restored file, which
+	// takes its repository's: a private file stays private.
+	if before.Exists && c.Source == nil {
 		mode = before.Mode.Perm()
 	}
 	if before.Exists && !m.SkipBackup {

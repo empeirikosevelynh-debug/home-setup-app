@@ -45,7 +45,8 @@ func ValidImportFolder(name string) error {
 
 // ImportJob describes one chosen folder. Inspection scans it and the plan
 // copies it, so both build it here. Copies saved on earlier days count as
-// saved, so running the import again never saves them twice.
+// saved, so running the import again never saves them twice, and files the
+// dotfiles repository manages are left to it.
 func ImportJob(h domain.Host, o domain.Options, folder string) domain.ImportJob {
 	sub, job := folder, domain.ImportJob{Source: filepath.Join(o.ImportFrom, folder), Destination: filepath.Join(h.Home, folder)}
 	if folder == "." {
@@ -56,6 +57,11 @@ func ImportJob(h domain.Host, o domain.Options, folder string) domain.ImportJob 
 	for _, date := range h.ConflictDates {
 		if date != o.RecoveryDate {
 			job.Saved = append(job.Saved, filepath.Join(base, date, sub))
+		}
+	}
+	for _, target := range dotfileTargets(h, o) {
+		if job.TopFilesOnly && filepath.Dir(target) == h.Home || !job.TopFilesOnly && target != job.Destination && within(job.Destination, target) {
+			job.Exclude = append(job.Exclude, target)
 		}
 	}
 	return job

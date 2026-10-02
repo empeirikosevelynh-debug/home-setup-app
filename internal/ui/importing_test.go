@@ -5,6 +5,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"context"
 	"golden-gate-setup/internal/domain"
+	"golden-gate-setup/internal/plan"
+	"golden-gate-setup/internal/testutil"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -80,7 +82,7 @@ func TestPlainImport(t *testing.T) {
 		return h, e
 	}
 	var out bytes.Buffer
-	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\n"+old+"\n.ssh,Documents\nnone\nno\n"), &out)
+	_, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\nnone\n"+old+"\n.ssh,Documents\nnone\nno\n"), &out)
 	if err != nil {
 		t.Fatal(err, out.String())
 	}
@@ -131,7 +133,7 @@ func TestPlainReviewsTheRest(t *testing.T) {
 		return domain.Report{Status: "complete"}, nil
 	}
 	var out bytes.Buffer
-	r, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\nnone\nnone\nyes\n\nyes\n"), &out)
+	r, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\nnone\nnone\nnone\nyes\n\nyes\n"), &out)
 	if err != nil || r.Status != "complete" || inspections != 2 || !strings.Contains(out.String(), "Review the rest of setup now?") {
 		t.Fatal(err, r.Status, inspections, out.String())
 	}
@@ -143,5 +145,28 @@ func TestClearedSourcesDropTheirChoices(t *testing.T) {
 	m.commitDraft()
 	if m.options.ImportFolders != nil || m.options.PreviousPackages != nil {
 		t.Fatal("choices kept without their source", m.options.ImportFolders, m.options.PreviousPackages)
+	}
+}
+
+func TestRestoredFileReviewShowsTheRepository(t *testing.T) {
+	h := testutil.FreshHost(t.TempDir())
+	target := filepath.Join(h.Home, ".zshrc")
+	h.DotfilesState = "cloned"
+	h.Dotfiles = []domain.Dotfile{{Target: target, Source: domain.FileSource{Root: h.Home, Path: filepath.Join(h.Home, "dot_zshrc"), SHA256: "repo"}, Mode: 0644, Contents: []byte("export EDITOR=zed\n")}}
+	h.Files[target] = domain.FileState{Path: target, Exists: true, Mode: 0644, SHA256: "mine", Contents: []byte("export EDITOR=vi\n")}
+	o := plan.DefaultOptions()
+	o.DotfilesRepo = "you"
+	changes := conflictChanges(Services{Build: plan.Build}, h, o)
+	var restored *domain.FileChange
+	for i := range changes {
+		if changes[i].Path == target {
+			restored = &changes[i]
+		}
+	}
+	if restored == nil || restored.Desired != nil {
+		t.Fatal("restored file not offered for review", changes)
+	}
+	if diff := DiffText(h.Files[target].Contents, proposed(h, *restored)); !strings.Contains(diff, "-export EDITOR=vi") || !strings.Contains(diff, "+export EDITOR=zed") {
+		t.Fatal(diff)
 	}
 }

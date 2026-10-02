@@ -157,7 +157,13 @@ func (e *Executor) Execute(ctx context.Context, p domain.Plan, emit func(domain.
 				if step.File == nil {
 					return fail(step, result, errors.New("file step has no reviewed change"))
 				}
-				result, er = e.Files.ApplyContext(ctx, *step.File, dir)
+				change := *step.File
+				if change.Source != nil {
+					if change.Desired, er = sourceContents(*change.Source); er != nil {
+						return fail(step, result, er)
+					}
+				}
+				result, er = e.Files.ApplyContext(ctx, change, dir)
 			default:
 				handler, ok := e.Handlers[step.Kind]
 				if !ok || handler.Apply == nil {

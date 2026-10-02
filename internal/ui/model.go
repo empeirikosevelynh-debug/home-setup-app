@@ -486,7 +486,7 @@ func (m *model) showConflict() {
 	m.form = nil
 	m.scroll = 0
 	c := m.conflicts[m.conflictIndex]
-	m.lines = c.Path + "\n" + DiffText(m.host.Files[c.Path].Contents, c.Desired)
+	m.lines = c.Path + "\n" + DiffText(m.host.Files[c.Path].Contents, proposed(m.host, c))
 }
 
 func restoredOptions(o domain.Options) domain.Options {

@@ -16,6 +16,9 @@ type Options struct {
 	// inside it, or "." for the files at its top.
 	ImportFrom    string   `json:",omitempty"`
 	ImportFolders []string `json:",omitempty"`
+	// DotfilesRepo is a chezmoi dotfiles repository: a GitHub user,
+	// user/repo or a Git URL.
+	DotfilesRepo string `json:",omitempty"`
 }
 type Workspace struct {
 	Language, Path, Module, EntryPoint string
@@ -45,7 +48,32 @@ type Host struct {
 	ImportProblems []string     `json:",omitempty"`
 	ConflictDates  []string     `json:",omitempty"`
 	FreeBytes      int64        `json:"-"`
+	// Read only when a dotfiles repository is chosen. DotfilesState is
+	// missing (not cloned yet), waiting (cloned, chezmoi not installed),
+	// cloned, or other (chezmoi's source holds other dotfiles, from
+	// DotfilesOrigin). Dotfiles are written as they are; DotfilesManual
+	// need chezmoi itself.
+	DotfilesState   string    `json:",omitempty"`
+	DotfilesOrigin  string    `json:",omitempty"`
+	Dotfiles        []Dotfile `json:",omitempty"`
+	DotfilesManual  []string  `json:",omitempty"`
+	DotfilesScripts bool      `json:",omitempty"`
+	DotfilesProblem string    `json:",omitempty"`
 }
+
+// Dotfile is a file a dotfiles repository restores as it is. Create files
+// are only written where nothing is.
+type Dotfile struct {
+	Target   string
+	Source   FileSource
+	Mode     fs.FileMode
+	Create   bool   `json:",omitempty"`
+	Contents []byte `json:"-"`
+}
+
+// FileSource is where a restored file's contents are read when it is
+// written, so they never enter session records.
+type FileSource struct{ Root, Path, SHA256 string }
 
 // ImportJob copies one folder of a previous home folder into this home.
 // Existing files are never replaced: a different version is saved under
@@ -106,6 +134,8 @@ type FileChange struct {
 	Mode               fs.FileMode
 	Desired            []byte
 	Decision           FileDecision
+	// Source replaces Desired for a restored file.
+	Source *FileSource `json:",omitempty"`
 }
 type Check struct{ Kind, Target, Expected string }
 type Step struct {

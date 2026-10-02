@@ -75,9 +75,15 @@ func selectionForm(o *domain.Options, dark func() bool) (*huh.Form, []*huh.Multi
 		fields = append(fields, huh.NewConfirm().Title("Create a new project if absent or empty?").Value(&w.Create))
 		groups = append(groups, huh.NewGroup(fields...).WithHideFunc(func() bool { return !plan.Has(o.Languages, w.Language) }))
 	}
+	dotfiles := huh.NewInput().Title("Dotfiles repository (optional)").Description("Your chezmoi dotfiles: a GitHub user, user/repo or a Git URL. Setup clones it, then restores its plain files after you review them; templates, encrypted files and scripts are left for chezmoi apply. Leave empty to skip.").Value(&o.DotfilesRepo).Validate(func(s string) error {
+		if s == "" {
+			return nil
+		}
+		return plan.ValidDotfilesRepo(s)
+	})
 	imports, folderList := importForm(o)
 	previous, previousList := previousForm(o)
-	groups = append(append(groups, imports...), previous...)
+	groups = append(append(append(groups, huh.NewGroup(dotfiles)), imports...), previous...)
 	return huh.NewForm(groups...).WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return formTheme(dark()) })), []*huh.MultiSelect[string]{apps, plugins, langs, folderList, previousList}
 }
 
@@ -151,9 +157,23 @@ func conflictChanges(s Services, h domain.Host, o domain.Options) []domain.FileC
 func fileForm(changes []domain.FileChange, h domain.Host, replace []bool, dark func() bool) *huh.Form {
 	var groups []*huh.Group
 	for i, c := range changes {
-		groups = append(groups, huh.NewGroup(huh.NewConfirm().Title("Replace "+c.Path+"?").Description(DiffText(h.Files[c.Path].Contents, c.Desired)).Value(&replace[i])))
+		groups = append(groups, huh.NewGroup(huh.NewConfirm().Title("Replace "+c.Path+"?").Description(DiffText(h.Files[c.Path].Contents, proposed(h, c))).Value(&replace[i])))
 	}
 	return huh.NewForm(groups...).WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return formTheme(dark()) }))
+}
+
+// proposed is what a change writes: its contents, or for a restored file,
+// the dotfiles repository's version read during inspection.
+func proposed(h domain.Host, c domain.FileChange) []byte {
+	if c.Source == nil {
+		return c.Desired
+	}
+	for _, d := range h.Dotfiles {
+		if d.Target == c.Path {
+			return d.Contents
+		}
+	}
+	return nil
 }
 func DiffText(before, after []byte) string {
 	safe := func(data []byte) string {
