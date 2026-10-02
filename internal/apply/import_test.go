@@ -63,7 +63,7 @@ func TestExecuteImportsWithoutRescanning(t *testing.T) {
 		current := h
 		scans = append(scans, len(o.ImportFolders))
 		for _, folder := range o.ImportFolders {
-			scan, err := files.ScanImport(plan.ImportJob(current, o, folder))
+			scan, err := files.ScanImport(plan.ImportJob(current, o, folder), nil)
 			scan.Folder = folder
 			current.Import = append(current.Import, scan)
 			if err != nil {

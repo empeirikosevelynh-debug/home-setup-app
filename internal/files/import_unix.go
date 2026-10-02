@@ -248,9 +248,10 @@ func sameBytes(ctx context.Context, dst, src io.Reader) (bool, error) {
 
 // ScanImport reports what Import would do without writing anything. The
 // digest covers the source and destination entries it compared, so a change
-// between preview and apply is noticed.
-func ScanImport(job domain.ImportJob) (domain.ImportScan, error) {
-	s := scanner{job: job, exclude: set(job.Exclude), digest: sha256.New()}
+// between preview and apply is noticed. landed, when set, receives each
+// regular file that will be, or already is, at its destination.
+func ScanImport(job domain.ImportJob, landed func(dst, src string)) (domain.ImportScan, error) {
+	s := scanner{job: job, exclude: set(job.Exclude), digest: sha256.New(), landed: landed}
 	root, err := os.Lstat(job.Destination)
 	if err != nil && !os.IsNotExist(err) {
 		return s.result, err
@@ -266,6 +267,7 @@ type scanner struct {
 	exclude map[string]bool
 	digest  hash.Hash
 	result  domain.ImportScan
+	landed  func(dst, src string)
 }
 
 // describe is what the digest records about an entry. Folder sizes and
@@ -331,6 +333,9 @@ func (s *scanner) dir(src, dst, rel string, blocked, top bool) error {
 						return err
 					}
 				}
+			}
+			if s.landed != nil && !blocked && (target == nil || same) {
+				s.landed(dstPath, srcPath)
 			}
 			switch {
 			case !blocked && target == nil:

@@ -3,6 +3,7 @@ package ui
 import (
 	"bytes"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 	"context"
 	"golden-gate-setup/internal/domain"
 	"golden-gate-setup/internal/plan"
@@ -170,5 +171,36 @@ func TestDotfileReviewShowsTheRepository(t *testing.T) {
 	}
 	if text := ChangeText(h, changes[secret]); !strings.Contains(text, "is encrypted, so it can't be compared before applying") {
 		t.Fatal(text)
+	}
+}
+
+func TestChezmoiCandidatesAsked(t *testing.T) {
+	h := testutil.FreshHost(t.TempDir())
+	zshrc, tool := filepath.Join(h.Home, ".zshrc"), filepath.Join(h.Home, ".config/tool/config")
+	h.ChezmoiCandidates = []string{zshrc, tool}
+	var built domain.Options
+	s := Services{Inspect: func(context.Context, domain.Options) (domain.Host, error) { return h, nil }, Build: func(h domain.Host, o domain.Options) (domain.Plan, error) {
+		built = o
+		return plan.Build(h, o)
+	}}
+	var out bytes.Buffer
+	if _, err := RunPlain(context.Background(), s, strings.NewReader("no\nzed\nnone\nnone\nno\nno\nno\nno\nnone\nnone\nnone\n~/.zshrc\nno\n"), &out); err != nil {
+		t.Fatal(err, out.String())
+	}
+	if !reflect.DeepEqual(built.ChezmoiAdd, []string{zshrc}) || !strings.Contains(out.String(), "Imported dotfiles you can add to chezmoi: ~/.zshrc, ~/.config/tool/config") || !strings.Contains(out.String(), "Add which to chezmoi? (a comma list, or none) [none]") {
+		t.Fatal(built.ChezmoiAdd, out.String())
+	}
+	// The wizard asks after inspection, with nothing ticked.
+	m := newModel(context.Background(), s)
+	m.width, m.height = 80, 24
+	m.Update(inspected{host: h})
+	if m.stage != "chezmoi" || len(m.chezmoiChoice) != 0 || !strings.Contains(m.View().Content, "Add imported dotfiles to chezmoi?") {
+		t.Fatal("chezmoi question not shown", m.stage, m.chezmoiChoice)
+	}
+	m.chezmoiChoice = []string{tool}
+	m.form.State = huh.StateCompleted
+	m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	if m.stage != "preview" || !reflect.DeepEqual(m.options.ChezmoiAdd, []string{tool}) || !strings.Contains(m.lines, "with 1 imported dotfiles") {
+		t.Fatal("choice not planned", m.stage, m.options.ChezmoiAdd)
 	}
 }

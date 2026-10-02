@@ -252,14 +252,14 @@ func TestPreviousAppListRead(t *testing.T) {
 func TestImportRead(t *testing.T) {
 	i, _ := fixture(t)
 	old := filepath.Join(t.TempDir(), "you")
-	for path, contents := range map[string]string{"Documents/a.txt": "a", "Documents/sub/b.txt": "bb", ".ssh/id_ed25519": "key", ".zshrc": "zsh"} {
+	for path, contents := range map[string]string{"Documents/a.txt": "a", "Documents/sub/b.txt": "bb", ".ssh/id_ed25519": "key", ".zshrc": "zsh", ".config/fish/fish_variables": "SETUVAR _fisher_plugins:jorgebucaran/fisher\n", ".config/fish/config.fish": "set -g old 1\n", ".config/fish/functions/custom.fish": "function custom; end\n", ".config/gh/hosts.yml": "github.com:\n  oauth_token: abc\n", ".zsh_history": "ls\n", ".config/tool/secrets.txt": "x"} {
 		os.MkdirAll(filepath.Dir(filepath.Join(old, path)), 0700)
 		os.WriteFile(filepath.Join(old, path), []byte(contents), 0600)
 	}
 	os.MkdirAll(filepath.Join(i.Home, "Imported conflicts", "2026-09-30"), 0700)
 	o := plan.DefaultOptions()
 	o.RecoveryDate = "2026-10-02"
-	o.ImportFrom, o.ImportFolders = old, []string{"Documents", ".ssh", "."}
+	o.ImportFrom, o.ImportFolders = old, []string{"Documents", ".ssh", ".", ".config"}
 	before, beforeOld := snapshot(t, i.Home), snapshot(t, old)
 	h, e := i.Read(context.Background(), o)
 	if e != nil {
@@ -268,14 +268,29 @@ func TestImportRead(t *testing.T) {
 	if !reflect.DeepEqual(before, snapshot(t, i.Home)) || !reflect.DeepEqual(beforeOld, snapshot(t, old)) {
 		t.Fatal("inspection wrote files")
 	}
-	if len(h.Import) != 3 || h.Import[0].Folder != "Documents" || h.Import[0].Copy != 2 || h.Import[0].CopyBytes != 3 || h.Import[1].Copy != 1 || h.Import[2].Copy != 1 || h.FreeBytes <= 0 {
+	if len(h.Import) != 4 || h.Import[0].Folder != "Documents" || h.Import[0].Copy != 2 || h.Import[0].CopyBytes != 3 || h.Import[1].Copy != 1 || h.Import[2].Copy != 2 || h.FreeBytes <= 0 {
 		t.Fatalf("import misread: %+v %d", h.Import, h.FreeBytes)
 	}
 	if !reflect.DeepEqual(h.ConflictDates, []string{"2026-09-30"}) {
 		t.Fatal(h.ConflictDates)
 	}
-	if p, e := plan.Build(h, o); e != nil || len(p.Steps) == 0 || p.Later == "" {
-		t.Fatal("import not planned", e)
+	// Only small text files without keys or secrets are offered to chezmoi.
+	var offered []string
+	for _, path := range h.ChezmoiCandidates {
+		rel, _ := filepath.Rel(i.Home, path)
+		offered = append(offered, rel)
+	}
+	slices.Sort(offered)
+	if want := []string{".config/fish/config.fish", ".config/fish/fish_variables", ".config/fish/functions/custom.fish", ".zshrc"}; !reflect.DeepEqual(offered, want) {
+		t.Fatalf("offered to chezmoi: %q", offered)
+	}
+	// The plan is made against what the import brings, in the same review.
+	fish := h.Files[filepath.Join(i.Home, ".config/fish/config.fish")]
+	if !fish.Exists || !fish.Imported || string(fish.Contents) != "set -g old 1\n" || !h.FishPluginConflict || !reflect.DeepEqual(h.FishInstalledPlugins, []string{"jorgebucaran/fisher"}) {
+		t.Fatalf("incoming configuration not projected: %+v %v %q", fish, h.FishPluginConflict, h.FishInstalledPlugins)
+	}
+	if p, e := plan.Build(h, o); e != nil || len(p.Steps) == 0 || p.Later != "" {
+		t.Fatal("import not planned in one review", e, p.Later)
 	}
 	os.Symlink(filepath.Join(old, "Documents"), filepath.Join(old, "Linked"))
 	for _, folders := range [][]string{{"Linked"}, {"Music"}, {"Library"}} {

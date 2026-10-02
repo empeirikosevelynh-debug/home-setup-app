@@ -145,7 +145,7 @@ func buildWindows(h domain.Host, o domain.Options, p domain.Plan) (domain.Plan, 
 		add(languageStep(o))
 	}
 	if o.AdoptChezmoi {
-		addChezmoi(&p, h, add)
+		addChezmoi(&p, h, nil, add)
 	}
 	p.ManualTasks = append(p.ManualTasks, WindowsFinishTasks(o)...)
 	var err error

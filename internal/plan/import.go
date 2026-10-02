@@ -94,56 +94,36 @@ func plural(n int, one, many string) string {
 	return fmt.Sprintf("%d %s", n, many)
 }
 
-// touchesSetup reports whether importing folder can change files the rest
-// of setup reads or writes: dotfiles, chezmoi's source or a project
-// workspace.
-func touchesSetup(h domain.Host, o domain.Options, folder string) bool {
-	if strings.HasPrefix(folder, ".") {
-		return true
-	}
-	dest := filepath.Join(h.Home, folder)
-	if h.ChezmoiDir != "" && within(dest, h.ChezmoiDir) {
-		return true
-	}
-	for _, w := range o.Workspaces {
-		if w.Path != "" && Has(o.Languages, w.Language) && within(dest, w.Path) {
-			return true
-		}
-	}
-	return false
-}
-
 // addImport plans one import step for each chosen folder that has files to
 // copy or compare. Nothing here is replaced; differing files are saved in a
-// dated conflicts folder. It reports whether a step can change files the
-// rest of setup reads, which is then planned in a second review.
-func addImport(p *domain.Plan, h domain.Host, o domain.Options, add func(domain.Step)) (bool, error) {
+// dated conflicts folder. Inspection has already projected what the import
+// brings onto the files the rest of setup reads.
+func addImport(p *domain.Plan, h domain.Host, o domain.Options, add func(domain.Step)) error {
 	if o.ImportFrom == "" {
 		if len(o.ImportFolders) > 0 {
-			return false, fmt.Errorf("choose the previous home folder to import from")
+			return fmt.Errorf("choose the previous home folder to import from")
 		}
-		return false, nil
+		return nil
 	}
 	if err := ValidImportSource(h, o.ImportFrom); err != nil {
-		return false, err
+		return err
 	}
 	if _, err := time.Parse("2006-01-02", o.RecoveryDate); err != nil {
-		return false, fmt.Errorf("invalid recovery date")
+		return fmt.Errorf("invalid recovery date")
 	}
 	if len(h.ImportProblems) > 0 {
 		p.Supported = false
 		p.Problems = append(p.Problems, h.ImportProblems...)
 	}
 	var need int64
-	later := false
 	aside, cloud, special := 0, 0, 0
 	seen := map[string]bool{}
 	for _, folder := range o.ImportFolders {
 		if err := ValidImportFolder(folder); err != nil {
-			return false, err
+			return err
 		}
 		if seen[folder] {
-			return false, fmt.Errorf("%s is chosen twice", importName(folder))
+			return fmt.Errorf("%s is chosen twice", importName(folder))
 		}
 		seen[folder] = true
 		var scan *domain.ImportScan
@@ -156,14 +136,13 @@ func addImport(p *domain.Plan, h domain.Host, o domain.Options, add func(domain.
 			if len(h.ImportProblems) > 0 {
 				continue
 			}
-			return false, fmt.Errorf("%s was not inspected in %s", importName(folder), o.ImportFrom)
+			return fmt.Errorf("%s was not inspected in %s", importName(folder), o.ImportFrom)
 		}
 		need += scan.CopyBytes + scan.DifferBytes
 		aside, cloud, special = aside+scan.Differ+scan.Aside, cloud+scan.CloudOnly, special+scan.Special
 		if scan.Copy+scan.Differ == 0 {
 			continue
 		}
-		later = later || touchesSetup(h, o, folder)
 		job := ImportJob(h, o, folder)
 		label := fmt.Sprintf("Import %s from your previous Mac: %s (%s)", importName(folder), plural(scan.Copy, "new file", "new files"), SizeText(scan.CopyBytes))
 		if scan.Differ > 0 {
@@ -184,5 +163,5 @@ func addImport(p *domain.Plan, h domain.Host, o domain.Options, add func(domain.
 	if special > 0 {
 		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "import-special", Title: "Skipped special files", Instructions: plural(special, "socket, pipe or device file", "sockets, pipes or device files") + " in the previous home folder are not copied; programs recreate them when needed.", Required: false})
 	}
-	return later, nil
+	return nil
 }

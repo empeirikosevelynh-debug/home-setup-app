@@ -62,6 +62,7 @@ type model struct {
 	err                   error
 	conflicts             []domain.FileChange
 	replacements          []bool
+	chezmoiChoice         []string
 	resume                domain.Session
 	useResume             bool
 	events                chan tea.Msg
@@ -75,6 +76,7 @@ func cloneOptions(o domain.Options) domain.Options {
 	o.Workspaces = append([]domain.Workspace(nil), o.Workspaces...)
 	o.PreviousPackages = append([]string(nil), o.PreviousPackages...)
 	o.ImportFolders = append([]string(nil), o.ImportFolders...)
+	o.ChezmoiAdd = append([]string(nil), o.ChezmoiAdd...)
 	m := map[string]domain.FileDecision{}
 	for k, v := range o.FileChoices {
 		m[k] = v
@@ -181,15 +183,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.reject(v.err)
 		}
 		m.host, m.preview = v.host, v.plan
-		m.conflicts = conflictChanges(m.services, m.host, m.options)
-		m.replacements = make([]bool, len(m.conflicts))
-		if len(m.conflicts) > 0 {
-			m.conflictIndex = 0
-			m.showConflict()
-			return m, nil
+		if len(m.host.ChezmoiCandidates) > 0 {
+			m.stage = "chezmoi"
+			m.chezmoiChoice = nil
+			for _, path := range m.host.ChezmoiCandidates {
+				if plan.Has(m.options.ChezmoiAdd, path) {
+					m.chezmoiChoice = append(m.chezmoiChoice, path)
+				}
+			}
+			var list *huh.MultiSelect[string]
+			m.form, list = chezmoiForm(m.host, &m.chezmoiChoice, func() bool { return m.dark })
+			m.lists = []*huh.MultiSelect[string]{list}
+			m.resizeForm()
+			return m, m.form.Init()
 		}
-		m.showPreview()
-		return m, nil
+		return m.reviewFiles()
 	case domain.Event:
 		m.lines += v.Status + ": " + v.Text + "\n"
 		if len(m.lines) > 65536 {
@@ -316,7 +324,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
-	if m.form != nil && (m.stage == "welcome" || m.stage == "select" || m.stage == "files") {
+	if m.form != nil && (m.stage == "welcome" || m.stage == "select" || m.stage == "files" || m.stage == "chezmoi") {
 		next, cmd := m.form.Update(msg)
 		if f, ok := next.(*huh.Form); ok {
 			m.form = f
@@ -335,6 +343,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.form = nil
 				m.notice = ""
 				return m, m.inspectCmd()
+			case "chezmoi":
+				m.options.ChezmoiAdd = append([]string(nil), m.chezmoiChoice...)
+				m.form = nil
+				return m.reviewFiles()
 			case "files":
 				for i, c := range m.conflicts {
 					if m.replacements[i] {
@@ -359,6 +371,25 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 func (m *model) readEvent() tea.Cmd { return func() tea.Msg { return <-m.events } }
+
+// reviewFiles plans with the current choices, then asks about each file a
+// step would replace before showing the plan.
+func (m *model) reviewFiles() (tea.Model, tea.Cmd) {
+	p, e := m.services.Build(m.host, m.options)
+	if e != nil {
+		return m.reject(e)
+	}
+	m.preview = p
+	m.conflicts = conflictChanges(m.services, m.host, m.options)
+	m.replacements = make([]bool, len(m.conflicts))
+	if len(m.conflicts) > 0 {
+		m.conflictIndex = 0
+		m.showConflict()
+		return m, nil
+	}
+	m.showPreview()
+	return m, nil
+}
 
 // continues reports whether the applied plan left the rest of setup for a
 // second review.

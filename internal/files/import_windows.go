@@ -10,7 +10,7 @@ import (
 
 var errImportUnavailable = errors.New("importing a previous home folder is not available on Windows yet")
 
-func ScanImport(domain.ImportJob) (domain.ImportScan, error) {
+func ScanImport(domain.ImportJob, func(dst, src string)) (domain.ImportScan, error) {
 	return domain.ImportScan{}, errImportUnavailable
 }
 func (Manager) Import(context.Context, domain.ImportJob, func(string)) (domain.ImportScan, error) {

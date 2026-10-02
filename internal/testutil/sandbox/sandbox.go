@@ -244,6 +244,8 @@ func (s *Sandbox) Run(ctx context.Context, c domain.Command, w io.Writer) error 
 				s.origin = repo[0]
 			}
 			return os.MkdirAll(filepath.Join(src, ".git"), 0700)
+		case "dump-config":
+			io.WriteString(w, `{"data":{"email":"you@example.test"}}`)
 		case "cat":
 			sources := s.sources(src)
 			for _, target := range after(c.Args, "--") {

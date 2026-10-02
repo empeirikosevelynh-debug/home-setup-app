@@ -14,7 +14,10 @@ import (
 	"strings"
 )
 
-func chezmoiConfig(ctx context.Context, h domain.Host) (string, func(), error) {
+// chezmoiConfig writes a temporary configuration that keeps chezmoi's Git
+// actions and hooks off. It carries your template data, so a templated
+// .chezmoiignore still decides what chezmoi manages.
+func chezmoiConfig(ctx context.Context, h domain.Host, r command.Runner) (string, func(), error) {
 	m := files.Manager{Roots: []string{h.Home}}
 	work := filepath.Join(StateDir(h.OS, h.Home), "work")
 	if e := m.EnsurePrivateDir(work); e != nil {
@@ -29,7 +32,17 @@ func chezmoiConfig(ctx context.Context, h domain.Host) (string, func(), error) {
 	if src == "" {
 		src = filepath.Join(h.Home, ".local/share/chezmoi")
 	}
-	data, _ := json.Marshal(map[string]any{"sourceDir": src, "persistentState": filepath.Join(dir, "state.boltdb"), "cacheDir": filepath.Join(dir, "cache"), "tempDir": dir, "destDir": h.Home, "git": map[string]any{"autoAdd": false, "autoCommit": false, "autoPush": false}, "hooks": map[string]any{}, "color": false})
+	config := map[string]any{"sourceDir": src, "persistentState": filepath.Join(dir, "state.boltdb"), "cacheDir": filepath.Join(dir, "cache"), "tempDir": dir, "destDir": h.Home, "git": map[string]any{"autoAdd": false, "autoCommit": false, "autoPush": false}, "hooks": map[string]any{}, "color": false}
+	if tool := h.Tools["chezmoi"]; tool != "" && r != nil {
+		var b bytes.Buffer
+		var current struct {
+			Data map[string]any `json:"data"`
+		}
+		if r.Run(ctx, domain.Command{Path: tool, Args: []string{"dump-config", "--format=json", "--no-pager", "--no-tty"}}, &b) == nil && json.Unmarshal(b.Bytes(), &current) == nil && len(current.Data) > 0 {
+			config["data"] = current.Data
+		}
+	}
+	data, _ := json.Marshal(config)
 	path := filepath.Join(dir, "config.json")
 	_, e = m.ApplyContext(ctx, domain.FileChange{Path: path, Desired: data, Mode: 0600, Decision: domain.Create}, dir)
 	if e != nil {
@@ -62,7 +75,7 @@ func AdoptChezmoi(ctx context.Context, h domain.Host, chosen []string, r command
 	if h.Tools["chezmoi"] == "" {
 		return fmt.Errorf("chezmoi unavailable")
 	}
-	config, cleanup, e := chezmoiConfig(ctx, h)
+	config, cleanup, e := chezmoiConfig(ctx, h, r)
 	if e != nil {
 		return e
 	}

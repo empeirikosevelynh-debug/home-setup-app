@@ -75,27 +75,43 @@ func TestImportPlanned(t *testing.T) {
 	}
 }
 
-func TestImportOfDotfilesDefersTheRest(t *testing.T) {
+func TestImportPlansAgainstIncomingFiles(t *testing.T) {
 	h, o := importHost(t)
 	o.ImportFolders = []string{"Documents", ".ssh"}
+	fish, gitconfig := filepath.Join(h.Home, ".config/fish/config.fish"), filepath.Join(h.Home, ".gitconfig")
+	h.Files[fish] = domain.FileState{Path: fish, Exists: true, Imported: true, Mode: 0644, SHA256: "old", Contents: []byte("set -g old 1\n")}
+	h.Files[gitconfig] = domain.FileState{Path: gitconfig, Exists: true, Imported: true, Mode: 0644, SHA256: "git"}
 	p, err := plan.Build(h, o)
-	if err != nil || p.Later == "" {
+	if err != nil || p.Later != "" || len(steps(p, "import")) != 2 {
 		t.Fatal(err, p.Later)
 	}
-	if len(steps(p, "import")) != 2 || len(steps(p, "file"))+len(steps(p, "git"))+len(steps(p, "recovery")) != 0 || task(p, "github-auth") != nil {
-		t.Fatalf("the rest of setup was not left for the second review: %+v", p.Steps)
+	if task(p, "file:"+fish) == nil {
+		t.Fatal("the imported Fish configuration is not kept")
 	}
-	// Once imported, nothing is left to copy and the full plan follows.
-	h.Import[0].Copy, h.Import[0].Differ, h.Import[2].Copy = 0, 0, 0
-	if p, err = plan.Build(h, o); err != nil || p.Later != "" || len(steps(p, "file")) == 0 {
-		t.Fatal(err, p.Later)
+	for _, s := range p.Steps {
+		if s.ID == "file:"+fish {
+			t.Fatal("starter template planned over the imported file")
+		}
+		if s.Kind == "git" && (len(s.BeforeFiles) == 0 || s.BeforeFiles[0].SHA256 != "git") {
+			t.Fatal("Git step not checked against the imported configuration", s.BeforeFiles)
+		}
 	}
-	// A project workspace inside an imported folder defers the rest too.
-	h, o = importHost(t)
-	o.Languages = []string{"go"}
-	o.Workspaces = []domain.Workspace{{Language: "go", Path: filepath.Join(h.Home, "Documents/hello"), Module: "example.com/hello"}}
-	if p, err = plan.Build(h, o); err != nil || p.Later == "" {
-		t.Fatal(err, p.Later)
+	// An approved replacement of an imported file is checked against it.
+	o.FileChoices[fish] = domain.Replace
+	if p, err = plan.Build(h, o); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, s := range p.Steps {
+		found = found || s.ID == "file:"+fish && s.File.BeforeExists && s.File.BeforeSHA256 == "old"
+	}
+	if !found {
+		t.Fatal("replacement not planned against the imported file")
+	}
+	// An imported chezmoi source is reviewed before anything is added to it.
+	h.ChezmoiIncoming = true
+	if p, err = plan.Build(h, o); err != nil || len(steps(p, "chezmoi")) != 0 || task(p, "chezmoi-imported") == nil {
+		t.Fatal("adoption planned into an incoming chezmoi source", err)
 	}
 }
 
@@ -152,5 +168,25 @@ func TestWindowsRefusesImport(t *testing.T) {
 	o.ImportFrom, o.ImportFolders = `D:\Users\you`, []string{"Documents"}
 	if _, err := plan.Build(testutil.FreshWindowsHost(`C:\Users\you`), o); err == nil || !strings.Contains(err.Error(), "not available on Windows") {
 		t.Fatal(err)
+	}
+}
+
+func TestImportedDotfilesAddedToChezmoi(t *testing.T) {
+	h, o := importHost(t)
+	zshrc, other := filepath.Join(h.Home, ".zshrc"), filepath.Join(h.Home, ".ssh/id_ed25519")
+	h.ChezmoiCandidates = []string{zshrc}
+	o.AdoptChezmoi = false
+	o.ChezmoiAdd = []string{zshrc, other}
+	p, err := plan.Build(h, o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adopt := steps(p, "chezmoi")
+	if len(adopt) != 1 || adopt[0].Check.Expected != zshrc || !strings.Contains(adopt[0].Label, "with 1 imported dotfiles") || task(p, "dotfiles-commit") == nil {
+		t.Fatalf("only offered files are added: %+v", adopt)
+	}
+	o.ChezmoiAdd = nil
+	if p, err = plan.Build(h, o); err != nil || len(steps(p, "chezmoi")) != 0 {
+		t.Fatal("adoption planned with nothing chosen", err)
 	}
 }

@@ -128,16 +128,10 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 		p.ID, err = Fingerprint(p)
 		return p, err
 	}
-	later, err := addImport(&p, h, o, add)
-	if err != nil {
+	if err := addImport(&p, h, o, add); err != nil {
 		return p, err
 	}
 	restored := addDotfiles(&p, h, o, add)
-	if later {
-		p.Later = "Configuration files, Git, Fish plugins, project workspaces, language tools, chezmoi and recovery records are planned in a second review, once the imported files are here."
-		p.ID, err = Fingerprint(p)
-		return p, err
-	}
 	config := []configFile{{"fish/config.fish", filepath.Join(h.Home, ".config/fish/config.fish")}, {"starship.toml", filepath.Join(h.Home, ".config/starship.toml")}, {"zed/settings.example.json", filepath.Join(h.Home, ".config/zed/settings.json")}, {"lazygit/config.yml", filepath.Join(h.LazyGitDir, "config.yml")}}
 	if o.PrepareRecovery && Has(o.Apps, "kopiaui") {
 		config = append(config, configFile{"recovery/kopiaignore", filepath.Join(h.Home, ".kopiaignore")})
@@ -194,8 +188,8 @@ func Build(h domain.Host, o domain.Options) (domain.Plan, error) {
 	if len(o.Languages) > 0 {
 		add(languageStep(o))
 	}
-	if o.AdoptChezmoi {
-		addChezmoi(&p, h, add)
+	if added := chezmoiAdds(h, o); o.AdoptChezmoi || len(added) > 0 {
+		addChezmoi(&p, h, added, add)
 	}
 	if o.CaptureInventory || o.PrepareRecovery {
 		add(domain.Step{ID: "recovery", Label: "Prepare dated recovery records", Kind: "recovery", Check: domain.Check{Kind: "recovery"}})
@@ -290,13 +284,35 @@ func languageStep(o domain.Options) domain.Step {
 	}
 	return domain.Step{ID: "language-tools", Label: label, Kind: "language-tools", Check: domain.Check{Kind: "language-tools"}}
 }
-func addChezmoi(p *domain.Plan, h domain.Host, add func(domain.Step)) {
-	if h.ChezmoiDir != "" && !within(h.Home, h.ChezmoiDir) {
+
+// chezmoiAdds keeps the chosen imported dotfiles that inspection offered:
+// a file that now holds a key or a secret is never added.
+func chezmoiAdds(h domain.Host, o domain.Options) []string {
+	var added []string
+	for _, path := range h.ChezmoiCandidates {
+		if Has(o.ChezmoiAdd, path) {
+			added = append(added, path)
+		}
+	}
+	return added
+}
+
+// addChezmoi plans adopting setup's chosen configuration, and the imported
+// dotfiles chosen for chezmoi, into chezmoi's source.
+func addChezmoi(p *domain.Plan, h domain.Host, added []string, add func(domain.Step)) {
+	if h.ChezmoiIncoming {
+		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "chezmoi-imported", Title: "Review your imported chezmoi source", Instructions: "The import brings your previous chezmoi source, so nothing is added to it now. Review it with chezmoi status, then run setup again to adopt files.", Required: false})
+	} else if h.ChezmoiDir != "" && !within(h.Home, h.ChezmoiDir) {
 		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "chezmoi-location", Title: "Adopt files in your custom chezmoi source", Instructions: "The source outside your home is preserved; review and add selected files manually.", Required: true})
 	} else if h.ChezmoiDirty {
 		p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "chezmoi-conflict", Title: "Preserve pending chezmoi source edits", Instructions: "Reconcile source edits before adopting the new live settings.", Required: false})
 	} else {
-		add(domain.Step{ID: "chezmoi", Label: "Adopt selected configuration into chezmoi", Kind: "chezmoi", Check: domain.Check{Kind: "chezmoi"}})
+		label := "Adopt selected configuration into chezmoi"
+		if len(added) > 0 {
+			label += fmt.Sprintf(", with %d imported dotfiles", len(added))
+			p.ManualTasks = append(p.ManualTasks, domain.ManualTask{ID: "dotfiles-commit", Title: "Commit and push the dotfiles you added", Instructions: "Setup adds " + homeList(h.Home, added) + " to chezmoi's source without committing. Review them with chezmoi git status, then commit and push them yourself; a public repository makes them public.", Required: false})
+		}
+		add(domain.Step{ID: "chezmoi", Label: label, Kind: "chezmoi", Check: domain.Check{Kind: "chezmoi", Expected: strings.Join(added, "\n")}})
 	}
 }
 func within(root, path string) bool {

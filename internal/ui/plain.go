@@ -224,6 +224,9 @@ func reviewPlain(ctx context.Context, s Services, p prompts, in io.Reader, o dom
 	if e != nil {
 		return domain.Report{}, domain.Plan{}, e
 	}
+	if o.ChezmoiAdd, e = askChezmoiAdd(p, h, o.ChezmoiAdd); e != nil {
+		return domain.Report{}, domain.Plan{}, e
+	}
 	for _, c := range conflictChanges(s, h, o) {
 		fmt.Fprintln(out, c.Path+"\n"+ChangeText(h, c))
 		yes, e := p.yes("Replace this file and save a private backup?", false)
@@ -363,4 +366,41 @@ func askPrevious(p prompts, o *domain.Options) error {
 	o.PreviousBrewfile = path
 	o.PreviousPackages, e = choosePrevious(answer, entries)
 	return e
+}
+
+// askChezmoiAdd asks which imported dotfiles to add to chezmoi's source.
+func askChezmoiAdd(p prompts, h domain.Host, previous []string) ([]string, error) {
+	if len(h.ChezmoiCandidates) == 0 {
+		return nil, nil
+	}
+	var names, preset []string
+	byName := map[string]string{}
+	for _, path := range h.ChezmoiCandidates {
+		name := homeName(h.Home, path)
+		names = append(names, name)
+		byName[name] = path
+		if plan.Has(previous, path) {
+			preset = append(preset, name)
+		}
+	}
+	def := strings.Join(preset, ",")
+	if def == "" {
+		def = "none"
+	}
+	fmt.Fprintf(p.out, "Imported dotfiles you can add to chezmoi: %s\nChosen files join chezmoi's source; you commit and push them yourself, and a public repository makes them public.\n", strings.Join(names, ", "))
+	answer, e := p.ask("Add which to chezmoi? (a comma list, or none)", def)
+	if e != nil || answer == "none" {
+		return nil, e
+	}
+	var chosen []string
+	for _, name := range strings.Split(answer, ",") {
+		path, ok := byName[strings.TrimSpace(name)]
+		if !ok {
+			return nil, fmt.Errorf("%q is not offered for chezmoi", strings.TrimSpace(name))
+		}
+		if !plan.Has(chosen, path) {
+			chosen = append(chosen, path)
+		}
+	}
+	return chosen, nil
 }

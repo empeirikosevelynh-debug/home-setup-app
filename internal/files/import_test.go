@@ -77,7 +77,7 @@ func TestImportCopiesNewFiles(t *testing.T) {
 	put(t, filepath.Join(old, "Documents/.DS_Store"), "finder", then)
 	os.Chtimes(filepath.Join(old, "Documents/Projects"), then, then)
 	job := importJob(old, home, "Documents")
-	scan, err := ScanImport(job)
+	scan, err := ScanImport(job, nil)
 	if err != nil || scan.Copy != 3 || scan.CopyBytes != 9 || scan.Differ+scan.Same != 0 || scan.Digest == "" {
 		t.Fatal(scan, err)
 	}
@@ -99,7 +99,7 @@ func TestImportCopiesNewFiles(t *testing.T) {
 	if _, err := os.Lstat(filepath.Join(home, "Documents/.DS_Store")); !os.IsNotExist(err) {
 		t.Fatal(".DS_Store copied")
 	}
-	again, err := ScanImport(job)
+	again, err := ScanImport(job, nil)
 	if err != nil || again.Copy+again.Differ != 0 || again.Same != 3 {
 		t.Fatal(again, err)
 	}
@@ -115,7 +115,7 @@ func TestImportKeepsYoursAndSavesTheirs(t *testing.T) {
 	put(t, filepath.Join(old, "Documents/notes.txt"), "theirs", then)
 	put(t, filepath.Join(home, "Documents/notes.txt"), "yours!", then.Add(time.Hour))
 	job := importJob(old, home, "Documents")
-	if scan, err := ScanImport(job); err != nil || scan.Differ != 1 || scan.DifferBytes != 6 {
+	if scan, err := ScanImport(job, nil); err != nil || scan.Differ != 1 || scan.DifferBytes != 6 {
 		t.Fatal(scan, err)
 	}
 	if ok, _ := m.Imported(ctx, job); ok {
@@ -135,12 +135,12 @@ func TestImportKeepsYoursAndSavesTheirs(t *testing.T) {
 		t.Fatal(ok, err)
 	}
 	// Running again, today or on a later day, saves nothing twice.
-	if scan, _ := ScanImport(job); scan.Differ != 0 || scan.Aside != 1 {
+	if scan, _ := ScanImport(job, nil); scan.Differ != 0 || scan.Aside != 1 {
 		t.Fatal(scan)
 	}
 	later := job
 	later.Conflicts, later.Saved = filepath.Join(home, "Imported conflicts", "2026-10-03", "Documents"), []string{job.Conflicts}
-	if scan, _ := ScanImport(later); scan.Differ != 0 || scan.Aside != 1 {
+	if scan, _ := ScanImport(later, nil); scan.Differ != 0 || scan.Aside != 1 {
 		t.Fatal(scan)
 	}
 	if done, err := m.Import(ctx, later, nil); err != nil || done.Aside != 1 || done.Differ != 0 {
@@ -167,7 +167,7 @@ func TestImportSkipsIdenticalFiles(t *testing.T) {
 	put(t, filepath.Join(home, "Documents/.localized"), "", then.Add(time.Hour))
 	put(t, filepath.Join(home, "Documents/same.txt"), "same", then.Add(time.Hour))
 	job := importJob(old, home, "Documents")
-	if scan, err := ScanImport(job); err != nil || scan.Same != 2 || scan.Copy+scan.Differ != 0 {
+	if scan, err := ScanImport(job, nil); err != nil || scan.Same != 2 || scan.Copy+scan.Differ != 0 {
 		t.Fatal(scan, err)
 	}
 	if done, err := m.Import(context.Background(), job, nil); err != nil || done.Same != 2 {
@@ -191,7 +191,7 @@ func TestImportNeverWritesThroughLinks(t *testing.T) {
 	os.Symlink(elsewhere, filepath.Join(home, "Pictures/sub"))
 	for _, folder := range []string{"Documents", "Pictures"} {
 		job := importJob(old, home, folder)
-		scan, err := ScanImport(job)
+		scan, err := ScanImport(job, nil)
 		if err != nil || scan.Differ != 1 || scan.Copy != map[string]int{"Documents": 0, "Pictures": 1}[folder] {
 			t.Fatal(folder, scan, err)
 		}
@@ -220,7 +220,7 @@ func TestImportSkipsSpecialFiles(t *testing.T) {
 		t.Skip("no named pipes here:", err)
 	}
 	job := importJob(old, home, "Documents")
-	if scan, err := ScanImport(job); err != nil || scan.Special != 1 || scan.Copy != 0 {
+	if scan, err := ScanImport(job, nil); err != nil || scan.Special != 1 || scan.Copy != 0 {
 		t.Fatal(scan, err)
 	}
 	if done, err := m.Import(context.Background(), job, nil); err != nil || done.Special != 1 {
@@ -239,7 +239,7 @@ func TestImportKeepsBundlesWhole(t *testing.T) {
 	put(t, filepath.Join(old, library, "originals/1.jpg"), "photo", then)
 	put(t, filepath.Join(home, library, "database/Photos.sqlite"), "new db", then.Add(time.Hour))
 	job := importJob(old, home, "Pictures")
-	if scan, err := ScanImport(job); err != nil || scan.Differ != 2 || scan.Copy != 0 {
+	if scan, err := ScanImport(job, nil); err != nil || scan.Differ != 2 || scan.Copy != 0 {
 		t.Fatal(scan, err)
 	}
 	if _, err := m.Import(ctx, job, nil); err != nil {
@@ -258,7 +258,7 @@ func TestImportKeepsBundlesWhole(t *testing.T) {
 	put(t, filepath.Join(old2, library, "originals/1.jpg"), "photo", then)
 	put(t, filepath.Join(home2, library, "originals/1.jpg"), "photo", then)
 	job2 := importJob(old2, home2, "Pictures")
-	if scan, err := ScanImport(job2); err != nil || scan.Copy != 1 || scan.Same != 1 {
+	if scan, err := ScanImport(job2, nil); err != nil || scan.Copy != 1 || scan.Same != 1 {
 		t.Fatal(scan, err)
 	}
 	if done, err := m2.Import(ctx, job2, nil); err != nil || done.Copy != 1 {
@@ -313,14 +313,14 @@ func TestImportScanDigest(t *testing.T) {
 	put(t, filepath.Join(old, "Documents/sub/a.txt"), "a", then)
 	put(t, filepath.Join(home, "Documents/sub/other.txt"), "mine", then)
 	job := importJob(old, home, "Documents")
-	first, _ := ScanImport(job)
+	first, _ := ScanImport(job, nil)
 	// Files that are not in the source and folder times are not compared.
 	put(t, filepath.Join(home, "Documents/sub/new.txt"), "new", then)
-	if again, _ := ScanImport(job); again.Digest != first.Digest {
+	if again, _ := ScanImport(job, nil); again.Digest != first.Digest {
 		t.Fatal("unrelated change altered the digest")
 	}
 	put(t, filepath.Join(home, "Documents/sub/a.txt"), "b", then.Add(time.Minute))
-	if changed, _ := ScanImport(job); changed.Digest == first.Digest || changed.Differ != 1 {
+	if changed, _ := ScanImport(job, nil); changed.Digest == first.Digest || changed.Differ != 1 {
 		t.Fatal("a compared file changed without notice", changed)
 	}
 }
@@ -331,7 +331,7 @@ func TestImportTopFilesAndExclusions(t *testing.T) {
 	put(t, filepath.Join(old, ".gitconfig"), "git", then)
 	put(t, filepath.Join(old, "Documents/a.txt"), "a", then)
 	job := domain.ImportJob{Source: old, Destination: home, Conflicts: filepath.Join(home, "Imported conflicts/2026-10-02/Top of home folder"), TopFilesOnly: true, Exclude: []string{filepath.Join(home, ".gitconfig")}}
-	if scan, err := ScanImport(job); err != nil || scan.Copy != 1 {
+	if scan, err := ScanImport(job, nil); err != nil || scan.Copy != 1 {
 		t.Fatal(scan, err)
 	}
 	if _, err := m.Import(context.Background(), job, nil); err != nil {

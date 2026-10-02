@@ -7,6 +7,7 @@ import (
 	"golden-gate-setup/internal/domain"
 	"golden-gate-setup/internal/plan"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -134,6 +135,25 @@ func previousForm(o *domain.Options) ([]*huh.Group, *huh.MultiSelect[string]) {
 		return e
 	})
 	return []*huh.Group{huh.NewGroup(path), huh.NewGroup(list).WithHideFunc(func() bool { return o.PreviousBrewfile == "" })}, list
+}
+
+// chezmoiForm asks which imported dotfiles to add to chezmoi's source.
+// Nothing is ticked: what is added can end up in a public repository.
+func chezmoiForm(h domain.Host, chosen *[]string, dark func() bool) (*huh.Form, *huh.MultiSelect[string]) {
+	options := []huh.Option[string]{}
+	for _, path := range h.ChezmoiCandidates {
+		options = append(options, huh.NewOption(homeName(h.Home, path), path).Selected(plan.Has(*chosen, path)))
+	}
+	list := huh.NewMultiSelect[string]().Title("Add imported dotfiles to chezmoi?").Description("Chosen files join chezmoi's source, so chezmoi manages them from now on; you commit and push them yourself, and a public repository makes them public. Keys, tokens and caches are never offered.").Options(options...).Value(chosen).Filterable(true)
+	return huh.NewForm(huh.NewGroup(list)).WithTheme(huh.ThemeFunc(func(bool) *huh.Styles { return formTheme(dark()) })), list
+}
+
+// homeName writes a path in this home as ~/path.
+func homeName(home, path string) string {
+	if rel, err := filepath.Rel(home, path); err == nil && inside(home, path) {
+		return "~/" + filepath.ToSlash(rel)
+	}
+	return path
 }
 func conflictChanges(s Services, h domain.Host, o domain.Options) []domain.FileChange {
 	trial := cloneOptions(o)

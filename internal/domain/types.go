@@ -19,6 +19,8 @@ type Options struct {
 	// DotfilesRepo is a chezmoi dotfiles repository: a GitHub user,
 	// user/repo or a Git URL.
 	DotfilesRepo string `json:",omitempty"`
+	// ChezmoiAdd holds imported dotfiles chosen for adding to chezmoi.
+	ChezmoiAdd []string `json:",omitempty"`
 }
 type Workspace struct {
 	Language, Path, Module, EntryPoint string
@@ -60,6 +62,10 @@ type Host struct {
 	DotfilesScripts  bool      `json:",omitempty"`
 	DotfilesRemovals bool      `json:",omitempty"`
 	DotfilesProblem  string    `json:",omitempty"`
+	// ChezmoiIncoming means the import brings a previous chezmoi source.
+	// ChezmoiCandidates are imported dotfiles that can be added to chezmoi.
+	ChezmoiIncoming   bool     `json:",omitempty"`
+	ChezmoiCandidates []string `json:",omitempty"`
 }
 
 // Dotfile is a file or link chezmoi manages. Kind is file, template,
@@ -110,7 +116,10 @@ type FileState struct {
 	Path, SHA256    string
 	Mode            fs.FileMode
 	Exists, Symlink bool
-	Contents        []byte `json:"-"`
+	// Imported is a file the chosen folders bring: the plan is made
+	// against it, since the import comes first.
+	Imported bool   `json:",omitempty"`
+	Contents []byte `json:"-"`
 }
 type Package struct{ Kind, Token, MinVersion string }
 type Command struct {

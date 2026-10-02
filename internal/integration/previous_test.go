@@ -58,6 +58,7 @@ func TestBringOverPreviousMac(t *testing.T) {
 	o.DotfilesRepo = "https://example.test/you/dotfiles.git"
 	o.ImportFrom, o.ImportFolders = old, []string{"Documents", ".", ".ssh"}
 	o.PreviousBrewfile, o.PreviousPackages = brewfile, []string{"tap:you/tools", "formula:jq", "cask:firefox"}
+	o.ChezmoiAdd = []string{filepath.Join(s.Home, ".editorconfig")}
 	ctx := context.Background()
 
 	// First review: packages and the previous Mac's apps, then the clone.
@@ -70,10 +71,17 @@ func TestBringOverPreviousMac(t *testing.T) {
 	}
 
 	// Second review: the import, which leaves the repository's files alone,
-	// and the restore. Hidden folders leave the rest for a third review.
+	// chezmoi applying the repository, and the rest of setup, planned against
+	// both.
 	p = preview(t, s, o)
-	if k := kinds(p); p.Later == "" || k["import"] != 3 || k["dotfile"] != 3 || k["package"]+k["chezmoi-init"] != 0 {
+	k := kinds(p)
+	if p.Later != "" || k["import"] != 3 || k["dotfile"] != 3 || k["file"] == 0 || k["package"]+k["chezmoi-init"] != 0 {
 		t.Fatalf("second review: %v %q", k, p.Later)
+	}
+	for _, step := range p.Steps {
+		if step.ID == "file:"+filepath.Join(s.Home, ".config/starship.toml") {
+			t.Fatal("starter template planned over the repository's file")
+		}
 	}
 	if r, err := x.Execute(ctx, p, nil); err != nil || r.Status != "complete" {
 		t.Fatal(err, r)
@@ -86,29 +94,17 @@ func TestBringOverPreviousMac(t *testing.T) {
 	if got := contents(t, filepath.Join(s.Home, "Imported conflicts", o.RecoveryDate, "Documents/notes.txt")); got != "theirs" {
 		t.Fatal("their version not saved aside:", got)
 	}
+	if got := contents(t, filepath.Join(s.Home, ".local/share/chezmoi/dot_editorconfig")); got != "root = true" {
+		t.Fatal("chosen imported dotfile not added to chezmoi:", got)
+	}
+	if _, err := os.Stat(filepath.Join(s.Home, ".local/share/chezmoi/private_dot_ssh")); !os.IsNotExist(err) {
+		t.Fatal("an unchosen dotfile was added to chezmoi")
+	}
 	sessions, _ := filepath.Glob(filepath.Join(s.Home, "sessions", "*.json"))
 	for _, session := range sessions {
 		if data, _ := os.ReadFile(session); bytes.Contains(data, []byte("repo zsh")) {
-			t.Fatal("restored contents entered a session record")
+			t.Fatal("repository contents entered a session record")
 		}
-	}
-
-	// Third review: the rest of setup, keeping the repository's files.
-	p = preview(t, s, o)
-	k := kinds(p)
-	if p.Later != "" || k["import"]+k["dotfile"] != 0 || k["file"] == 0 {
-		t.Fatalf("third review: %v %q", k, p.Later)
-	}
-	for _, step := range p.Steps {
-		if step.ID == "file:"+filepath.Join(s.Home, ".config/starship.toml") {
-			t.Fatal("starter template planned over the repository's file")
-		}
-	}
-	if r, err := x.Execute(ctx, p, nil); err != nil || r.Status != "complete" {
-		t.Fatal(err, r)
-	}
-	if contents(t, filepath.Join(s.Home, ".config/starship.toml")) != "repo starship" {
-		t.Fatal("repository file replaced")
 	}
 
 	// Nothing is left to bring over.
@@ -116,13 +112,13 @@ func TestBringOverPreviousMac(t *testing.T) {
 	p = preview(t, s, o)
 	if k := kinds(p); k["import"]+k["dotfile"]+k["chezmoi-init"]+k["tap"] != 0 {
 		h, _ := s.Inspect(ctx, o)
-		t.Fatalf("fourth review: %v %+v %+v", k, p.Steps, h.Import)
+		t.Fatalf("third review: %v %+v %+v", k, p.Steps, h.Import)
 	}
 	if r, err := x.Execute(ctx, p, nil); err != nil || r.Status != "complete" {
 		t.Fatal(err, r)
 	}
 	for _, c := range s.Calls() {
-		if len(c.Args) > 0 && (c.Args[0] == "install" || c.Args[0] == "init" || c.Args[0] == "tap" && len(c.Args) > 1) {
+		if len(c.Args) > 0 && (c.Args[0] == "install" || c.Args[0] == "init" || c.Args[0] == "apply" || c.Args[0] == "tap" && len(c.Args) > 1) {
 			t.Fatal("repeat mutation", c)
 		}
 	}

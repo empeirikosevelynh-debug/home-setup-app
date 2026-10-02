@@ -19,7 +19,11 @@ func FishUniversalVariables(h domain.Host) (map[string][]string, error) {
 	if !filepath.IsAbs(config) {
 		config = filepath.Join(h.Home, ".config")
 	}
-	path := filepath.Join(config, "fish/fish_variables")
+	return ReadFishVariables(filepath.Join(config, "fish/fish_variables"))
+}
+
+// ReadFishVariables reads a universal-variable store; a missing one is empty.
+func ReadFishVariables(path string) (map[string][]string, error) {
 	st, e := os.Stat(path)
 	if errors.Is(e, os.ErrNotExist) {
 		return map[string][]string{}, nil
